@@ -1,4 +1,5 @@
-import { Gameplan, applyTempoOverride, normalizeGameplan } from './gameplan';
+import { Gameplan, normalizeGameplan } from './gameplan';
+import { categoryCounts } from './playLibrary';
 
 export type InjuryStatus = 'HEALTHY' | 'QUESTIONABLE' | 'MINOR' | 'MULTI_WEEK';
 
@@ -79,8 +80,11 @@ export function isLikelyStarter(player: HealthPlayer, teamPlayers: HealthPlayer[
 }
 
 export function buildPostMatchHealthUpdates(team: HealthTeam, gameplan: Gameplan): PlayerHealthUpdate[] {
-  gameplan = normalizeGameplan(gameplan, team);
-  const effectiveTempo = applyTempoOverride(team.tempo, gameplan.tempoOverride);
+  gameplan = normalizeGameplan(gameplan);
+  const offCats = categoryCounts('offense', gameplan.offensivePlays);
+  const defCats = categoryCounts('defense', gameplan.defensivePlays);
+  const physicalOffenseLoad = (offCats.RUNNING ?? 0) >= 4 ? 2 : 0;
+  const blitzLoad = ((defCats.BLITZ ?? 0) + (defCats.ZONE_BLITZ ?? 0)) >= 4 ? 3 : 0;
   return team.players.map((player) => {
     const starter = isLikelyStarter(player, team.players);
     const existingWeeks = player.injuryWeeks ?? 0;
@@ -101,18 +105,15 @@ export function buildPostMatchHealthUpdates(team: HealthTeam, gameplan: Gameplan
       };
     }
 
-    const tempoLoad = effectiveTempo === 'FAST' ? 5 : effectiveTempo === 'SLOW' ? 1 : 3;
-    const offensiveLoad = gameplan.offensiveConcepts.some((concept) => ['FOUR_VERTICALS', 'POWER_RUN', 'HB_STRETCH'].includes(concept)) ? 2 : 0;
-    const defensiveLoad = gameplan.defensiveCounters.some((counter) => counter === 'MAN_BLITZ' || counter === 'RUN_BLITZ') || team.defenseStyle === 'AGGRESSIVE' ? 3 : 0;
+    const tempoLoad = 3;
     const positionLoad = ['RB', 'WR', 'LB', 'CB', 'DE'].includes(player.position) ? 2 : 1;
     const recovery = injuryStatus === 'MINOR' || injuryStatus === 'QUESTIONABLE' ? 1 : 0;
-    const fatigue = Math.max(0, Math.min(100, player.fatigue + tempoLoad + offensiveLoad + defensiveLoad + positionLoad - recovery));
+    const fatigue = Math.max(0, Math.min(100, player.fatigue + tempoLoad + physicalOffenseLoad + blitzLoad + positionLoad - recovery));
 
     const baseChance =
       0.006 +
       fatigue * 0.00035 +
-      (effectiveTempo === 'FAST' ? 0.008 : 0) +
-      (gameplan.defensiveCounters.some((counter) => counter === 'MAN_BLITZ' || counter === 'RUN_BLITZ') ? 0.006 : 0) +
+      (blitzLoad > 0 ? 0.006 : 0) +
       (player.position === 'RB' ? 0.006 : 0) +
       (injuryStatus === 'MINOR' ? 0.018 : 0);
     const injuryChance = (player.conditioning ?? 0) > 0 ? baseChance * 0.4 : baseChance;

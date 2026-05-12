@@ -5,28 +5,6 @@ export type OffenseStyle  = 'RUN_HEAVY'  | 'BALANCED' | 'PASS_HEAVY';
 export type DefenseStyle  = 'AGGRESSIVE' | 'BALANCED' | 'PREVENT';
 export type Tempo         = 'SLOW'       | 'NORMAL'   | 'FAST';
 
-export type OffensiveConcept =
-  | 'MESH'
-  | 'FOUR_VERTICALS'
-  | 'FLOOD'
-  | 'LEVELS'
-  | 'SLANTS_FLATS'
-  | 'PA_CROSSERS'
-  | 'HB_STRETCH'
-  | 'POWER_RUN'
-  | 'COUNTER';
-
-export type DefensiveCounter =
-  | 'ZONE_MATCH'
-  | 'ROBBER_COVERAGE'
-  | 'DEEP_QUARTERS'
-  | 'MAN_BLITZ'
-  | 'CONTAIN_EDGES'
-  | 'FORCE_UNDERNEATH'
-  | 'STACKED_FRONT'
-  | 'RUN_BLITZ'
-  | 'COVER_2_SHELL';
-
 export type OffensivePhilosophy =
   | 'WEST_COAST'
   | 'VERTICAL_SPREAD'
@@ -35,8 +13,10 @@ export type OffensivePhilosophy =
   | 'QUICK_GAME'
   | 'PLAY_ACTION_HEAVY';
 
-export type TempoOverride = 'SLOW_DOWN' | 'STANDARD' | 'PUSH_TEMPO';
 export type SchemeUnit = 'offense' | 'defense';
+export type OffensiveCategory = 'RUNNING' | 'SHORT_PASS' | 'MIDDLE_PASS' | 'LONG_PASS';
+export type DefensiveCategory = 'ZONE' | 'BLITZ' | 'ZONE_BLITZ' | 'MAN';
+export type PlayCategory = OffensiveCategory | DefensiveCategory;
 
 export type PlayFamily =
   | 'RUN_MIDDLE'
@@ -62,9 +42,13 @@ export interface PlayTemplate {
   id: string;
   unit: SchemeUnit;
   name: string;
-  family: PlayFamily;
-  tags: string[];
-  diagram: DiagramPath[];
+  category: PlayCategory;
+  categoryLabel: string;
+  categoryColor: string;
+  keySlots: string[];
+  family?: PlayFamily;
+  tags?: string[];
+  diagram?: DiagramPath[];
 }
 
 export interface TeamScheme {
@@ -91,15 +75,8 @@ export interface LineupReadiness {
 }
 
 export interface Gameplan {
-  offensiveConcepts: [OffensiveConcept, OffensiveConcept, OffensiveConcept];
-  defensiveCounters: [DefensiveCounter, DefensiveCounter, DefensiveCounter];
-  tempoOverride: TempoOverride;
-  offenseSchemeId?: string | null;
-  defenseSchemeId?: string | null;
-  offensivePlays?: string[];
-  defensivePlays?: string[];
-  offenseSchemeName?: string;
-  defenseSchemeName?: string;
+  offensivePlays: string[];
+  defensivePlays: string[];
 }
 
 export interface MeResponse {
@@ -229,9 +206,8 @@ export interface CoachRecommendation {
   reasoning: {
     offensive: string;
     defensive: string;
-    tempo:     string;
-    offensiveConcepts: Array<{ concept: OffensiveConcept; reason: string }>;
-    defensiveCounters: Array<{ counter: DefensiveCounter; reason: string }>;
+    offensiveDistribution: Array<{ category: OffensiveCategory; count: number; label: string }>;
+    defensiveDistribution: Array<{ category: DefensiveCategory; count: number; label: string }>;
   };
 }
 

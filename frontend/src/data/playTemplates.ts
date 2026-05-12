@@ -1,27 +1,85 @@
-import { PlayTemplate, SchemeUnit } from '../api/types';
+import { PlayCategory, PlayTemplate, SchemeUnit } from '../api/types';
+
+const CATEGORY_COLOR: Record<PlayCategory, string> = {
+  RUNNING: '#22C55E',
+  SHORT_PASS: '#38BDF8',
+  MIDDLE_PASS: '#FACC15',
+  LONG_PASS: '#F97316',
+  ZONE: '#3B82F6',
+  BLITZ: '#EF4444',
+  ZONE_BLITZ: '#A855F7',
+  MAN: '#14B8A6',
+};
+
+const CATEGORY_LABEL: Record<PlayCategory, string> = {
+  RUNNING: 'Running',
+  SHORT_PASS: 'Short Pass',
+  MIDDLE_PASS: 'Middle Pass',
+  LONG_PASS: 'Long Pass',
+  ZONE: 'Zone',
+  BLITZ: 'Blitz',
+  ZONE_BLITZ: 'Zone Blitz',
+  MAN: 'Man',
+};
+
+const offense = (id: string, name: string, category: PlayCategory, keySlots: string[]): PlayTemplate =>
+  play(id, 'offense', name, category, keySlots);
+
+const defense = (id: string, name: string, category: PlayCategory, keySlots: string[]): PlayTemplate =>
+  play(id, 'defense', name, category, keySlots);
 
 export const OFFENSE_PLAY_TEMPLATES: PlayTemplate[] = [
-  play('mesh', 'offense', 'Mesh', 'QUICK_PASS', ['quick', 'middle', 'underneath'], [['WR', '#38BDF8', [[12, 72], [38, 48], [72, 48]]], ['TE', '#FACC15', [[88, 72], [62, 50], [28, 50]]], ['RB', '#22C55E', [[50, 78], [45, 64], [35, 58]]]]),
-  play('four_verticals', 'offense', 'Four Verticals', 'DEEP_PASS', ['deep', 'vertical', 'shot'], [['X', '#38BDF8', [[14, 76], [14, 34], [18, 12]]], ['Z', '#38BDF8', [[86, 76], [86, 34], [82, 12]]], ['Y', '#FACC15', [[38, 76], [38, 28], [42, 10]]], ['F', '#FACC15', [[62, 76], [62, 28], [58, 10]]]]),
-  play('flood', 'offense', 'Flood', 'INTERMEDIATE_PASS', ['zone', 'sideline', 'levels'], [['Go', '#38BDF8', [[84, 76], [84, 24], [78, 12]]], ['Out', '#FACC15', [[56, 76], [62, 50], [82, 50]]], ['Flat', '#22C55E', [[46, 78], [62, 66], [84, 66]]]]),
-  play('levels', 'offense', 'Levels', 'INTERMEDIATE_PASS', ['middle', 'rhythm'], [['Dig', '#38BDF8', [[18, 76], [26, 46], [72, 46]]], ['Sit', '#FACC15', [[52, 76], [52, 56], [48, 54]]], ['Drive', '#22C55E', [[82, 76], [68, 60], [32, 60]]]]),
-  play('slants_flats', 'offense', 'Slants Flats', 'QUICK_PASS', ['quick', 'edge', 'underneath'], [['Slant', '#38BDF8', [[18, 76], [38, 58], [54, 54]]], ['Flat', '#22C55E', [[42, 78], [28, 68], [12, 66]]], ['Slant', '#FACC15', [[82, 76], [62, 58], [46, 54]]]]),
-  play('pa_crossers', 'offense', 'PA Crossers', 'PLAY_ACTION', ['play_action', 'crossing', 'deep'], [['Fake', '#A3E635', [[50, 82], [45, 70], [50, 62]]], ['Cross', '#38BDF8', [[18, 76], [34, 48], [78, 42]]], ['Over', '#FACC15', [[82, 76], [64, 42], [20, 34]]]]),
-  play('hb_stretch', 'offense', 'HB Stretch', 'RUN_WIDE', ['wide_run', 'edge', 'outside_zone'], [['HB', '#22C55E', [[50, 82], [58, 72], [78, 64], [92, 58]]], ['OL', '#FACC15', [[38, 70], [54, 66], [72, 62]]]]),
-  play('power_run', 'offense', 'Power Run', 'RUN_MIDDLE', ['inside_run', 'power', 'physical'], [['HB', '#22C55E', [[50, 82], [48, 70], [48, 54]]], ['Pull', '#FACC15', [[36, 72], [48, 66], [58, 56]]]]),
-  play('counter', 'offense', 'Counter', 'MISDIRECTION', ['inside_run', 'misdirection'], [['Step', '#A3E635', [[50, 82], [58, 76], [52, 70], [38, 56]]], ['Pull', '#FACC15', [[66, 72], [52, 66], [38, 58]]]]),
+  offense('inside_zone', 'Inside Zone', 'RUNNING', ['RB', 'LG', 'C']),
+  offense('outside_zone', 'Outside Zone', 'RUNNING', ['RB', 'LT', 'LG']),
+  offense('power', 'Power', 'RUNNING', ['RB', 'RG', 'RT']),
+  offense('counter', 'Counter', 'RUNNING', ['RB', 'LG', 'LT']),
+  offense('lead_iso', 'Lead Iso', 'RUNNING', ['RB', 'C', 'RG']),
+  offense('toss_sweep', 'Toss Sweep', 'RUNNING', ['RB', 'RT', 'WR1']),
+  offense('slants', 'Slants', 'SHORT_PASS', ['QB', 'WR1', 'SLOT']),
+  offense('stick', 'Stick', 'SHORT_PASS', ['QB', 'TE', 'SLOT']),
+  offense('mesh', 'Mesh', 'SHORT_PASS', ['QB', 'WR1', 'SLOT']),
+  offense('quick_out', 'Quick Out', 'SHORT_PASS', ['QB', 'WR1', 'WR2']),
+  offense('bubble_screen', 'Bubble Screen', 'SHORT_PASS', ['QB', 'SLOT', 'LG']),
+  offense('hitch', 'Hitch', 'SHORT_PASS', ['QB', 'WR2', 'TE']),
+  offense('levels', 'Levels', 'MIDDLE_PASS', ['QB', 'WR1', 'TE']),
+  offense('y_cross', 'Y-Cross', 'MIDDLE_PASS', ['QB', 'TE', 'WR2']),
+  offense('drive', 'Drive', 'MIDDLE_PASS', ['QB', 'SLOT', 'WR1']),
+  offense('curl_flat', 'Curl Flat', 'MIDDLE_PASS', ['QB', 'WR1', 'RB']),
+  offense('pa_boot', 'PA Boot', 'MIDDLE_PASS', ['QB', 'TE', 'RB']),
+  offense('snag', 'Snag', 'MIDDLE_PASS', ['QB', 'WR1', 'SLOT']),
+  offense('four_verticals', 'Four Verticals', 'LONG_PASS', ['QB', 'WR1', 'LT']),
+  offense('post_wheel', 'Post-Wheel', 'LONG_PASS', ['QB', 'WR1', 'RB']),
+  offense('sail', 'Sail', 'LONG_PASS', ['QB', 'WR2', 'TE']),
+  offense('air_six', 'Air Six', 'LONG_PASS', ['QB', 'WR1', 'LT']),
+  offense('pa_crossers', 'PA Crossers', 'LONG_PASS', ['QB', 'WR1', 'WR2']),
+  offense('take_shot', 'Take Shot', 'LONG_PASS', ['QB', 'WR1', 'SLOT']),
 ];
 
 export const DEFENSE_PLAY_TEMPLATES: PlayTemplate[] = [
-  play('zone_match', 'defense', 'Zone Match', 'ZONE_COVERAGE', ['zone', 'match', 'crossers'], [['Hook', '#38BDF8', [[28, 42], [28, 28], [42, 24]]], ['Hook', '#38BDF8', [[72, 42], [72, 28], [58, 24]]], ['Safety', '#FACC15', [[50, 24], [50, 10]]]]),
-  play('robber_coverage', 'defense', 'Robber Coverage', 'MAN_COVERAGE', ['robber', 'middle', 'man'], [['Robber', '#FACC15', [[50, 30], [50, 46], [42, 52]]], ['Man', '#38BDF8', [[20, 36], [20, 58]]], ['Man', '#38BDF8', [[80, 36], [80, 58]]]]),
-  play('deep_quarters', 'defense', 'Deep Quarters', 'ZONE_COVERAGE', ['deep', 'quarters', 'shell'], [['Q1', '#38BDF8', [[15, 34], [15, 12], [32, 12]]], ['Q2', '#38BDF8', [[38, 30], [38, 10], [50, 10]]], ['Q3', '#38BDF8', [[62, 30], [62, 10], [50, 10]]], ['Q4', '#38BDF8', [[85, 34], [85, 12], [68, 12]]]]),
-  play('man_blitz', 'defense', 'Man Blitz', 'BLITZ', ['man', 'pressure', 'blitz'], [['Edge', '#EF4444', [[32, 42], [42, 62], [48, 74]]], ['LB', '#EF4444', [[58, 42], [54, 62], [50, 74]]], ['Man', '#38BDF8', [[20, 34], [18, 60]]]]),
-  play('contain_edges', 'defense', 'Contain Edges', 'CONTAIN', ['edge', 'contain', 'wide_run'], [['Edge', '#F97316', [[18, 50], [10, 62], [8, 76]]], ['Edge', '#F97316', [[82, 50], [90, 62], [92, 76]]], ['Spill', '#FACC15', [[50, 48], [50, 66]]]]),
-  play('force_underneath', 'defense', 'Force Underneath', 'ZONE_COVERAGE', ['underneath', 'soft', 'limit_explosive'], [['Cloud', '#38BDF8', [[18, 34], [22, 20], [44, 22]]], ['Cloud', '#38BDF8', [[82, 34], [78, 20], [56, 22]]], ['Hook', '#FACC15', [[50, 42], [50, 54]]]]),
-  play('stacked_front', 'defense', 'Stacked Front', 'RUN_FIT', ['inside_run', 'front', 'box'], [['A', '#EF4444', [[44, 42], [44, 64]]], ['A', '#EF4444', [[56, 42], [56, 64]]], ['Safety', '#FACC15', [[50, 30], [50, 52]]]]),
-  play('run_blitz', 'defense', 'Run Blitz', 'BLITZ', ['run_fit', 'pressure', 'inside_run'], [['Mike', '#EF4444', [[50, 38], [48, 58], [48, 74]]], ['Will', '#EF4444', [[38, 42], [42, 60], [46, 70]]], ['Sam', '#EF4444', [[62, 42], [58, 60], [54, 70]]]]),
-  play('cover_2_shell', 'defense', 'Cover 2 Shell', 'ZONE_COVERAGE', ['two_high', 'sideline', 'shell'], [['Half', '#38BDF8', [[28, 30], [24, 12], [48, 10]]], ['Half', '#38BDF8', [[72, 30], [76, 12], [52, 10]]], ['Flat', '#FACC15', [[16, 44], [12, 56]]], ['Flat', '#FACC15', [[84, 44], [88, 56]]]]),
+  defense('cover_2', 'Cover 2', 'ZONE', ['FS', 'SS', 'MLB']),
+  defense('cover_3', 'Cover 3', 'ZONE', ['FS', 'MLB', 'CB1']),
+  defense('cover_4', 'Cover 4 Quarters', 'ZONE', ['FS', 'SS', 'CB1']),
+  defense('cover_6', 'Cover 6', 'ZONE', ['FS', 'SS', 'CB2']),
+  defense('tampa_2', 'Tampa 2', 'ZONE', ['FS', 'MLB', 'SS']),
+  defense('cover_3_cloud', 'Cover 3 Cloud', 'ZONE', ['CB1', 'FS', 'MLB']),
+  defense('edge_blitz', 'Edge Blitz', 'BLITZ', ['EDGE1', 'EDGE2', 'MLB']),
+  defense('inside_blitz', 'Inside Blitz', 'BLITZ', ['DT1', 'MLB', 'WLB']),
+  defense('safety_blitz', 'Safety Blitz', 'BLITZ', ['SS', 'MLB', 'EDGE1']),
+  defense('cover_0_blitz', 'Cover 0 Blitz', 'BLITZ', ['MLB', 'EDGE1', 'CB1']),
+  defense('slot_blitz', 'Slot Blitz', 'BLITZ', ['NCB', 'MLB', 'EDGE1']),
+  defense('double_a_gap', 'Double-A Gap', 'BLITZ', ['MLB', 'WLB', 'DT1']),
+  defense('fire_zone', 'Fire Zone', 'ZONE_BLITZ', ['MLB', 'EDGE1', 'FS']),
+  defense('ncaa_blitz', 'NCAA Blitz', 'ZONE_BLITZ', ['WLB', 'EDGE2', 'SS']),
+  defense('cross_dog', 'Cross Dog', 'ZONE_BLITZ', ['MLB', 'WLB', 'DT1']),
+  defense('five_under', 'Five Under', 'ZONE_BLITZ', ['NCB', 'MLB', 'FS']),
+  defense('three_deep_pres', 'Three-Deep Pressure', 'ZONE_BLITZ', ['EDGE1', 'MLB', 'CB1']),
+  defense('sim_pressure', 'Sim Pressure', 'ZONE_BLITZ', ['WLB', 'DT1', 'FS']),
+  defense('cover_1', 'Cover 1', 'MAN', ['CB1', 'CB2', 'FS']),
+  defense('cover_1_robber', 'Cover 1 Robber', 'MAN', ['CB1', 'SS', 'MLB']),
+  defense('cover_2_man', 'Cover 2 Man', 'MAN', ['CB1', 'CB2', 'FS']),
+  defense('cover_0_man', 'Cover 0 Man', 'MAN', ['CB1', 'CB2', 'MLB']),
+  defense('match_man', 'Match Man', 'MAN', ['NCB', 'CB1', 'MLB']),
+  defense('press_man', 'Press Man', 'MAN', ['CB1', 'CB2', 'EDGE1']),
 ];
 
 export const PLAY_TEMPLATES = [...OFFENSE_PLAY_TEMPLATES, ...DEFENSE_PLAY_TEMPLATES];
@@ -30,20 +88,20 @@ export function templatesForUnit(unit: SchemeUnit): PlayTemplate[] {
   return unit === 'offense' ? OFFENSE_PLAY_TEMPLATES : DEFENSE_PLAY_TEMPLATES;
 }
 
-function play(
-  id: string,
-  unit: SchemeUnit,
-  name: string,
-  family: PlayTemplate['family'],
-  tags: string[],
-  raw: Array<[string, string, Array<[number, number]>]>,
-): PlayTemplate {
+export function playById(id: string): PlayTemplate | undefined {
+  return PLAY_TEMPLATES.find((playTemplate) => playTemplate.id === id);
+}
+
+function play(id: string, unit: SchemeUnit, name: string, category: PlayCategory, keySlots: string[]): PlayTemplate {
   return {
     id,
     unit,
     name,
-    family,
-    tags,
-    diagram: raw.map(([label, color, points]) => ({ label, color, points })),
+    category,
+    categoryLabel: CATEGORY_LABEL[category],
+    categoryColor: CATEGORY_COLOR[category],
+    keySlots,
+    tags: keySlots,
+    diagram: [],
   };
 }

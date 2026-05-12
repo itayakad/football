@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { simulateMatch, TeamMatchProfile } from './matchEngine';
 import { computeStandings, TeamRecord } from './standings';
 import { chooseAIGameplan } from './aiCoach';
+import { normalizePlayLoadout } from './playLibrary';
 
 export interface MatchResultRecord {
   week: number;
@@ -35,8 +36,6 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
   const allMatchResults: MatchResultRecord[] = [];
 
   for (let week = 1; week <= TOTAL_WEEKS; week++) {
-    // Load matches with full team + player data.
-    // Players needed for position group calculations (OL vs front seven, etc.)
     const weekMatches = await prisma.match.findMany({
       where: { week, played: false },
       include: {
@@ -45,8 +44,6 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
       },
     });
 
-    // Snapshot morale at start of week — games within the same week don't
-    // affect each other. Win streaks compound week-over-week, not game-over-game.
     type WeekResult = {
       matchId: string;
       leagueId: string;
@@ -65,37 +62,25 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
 
     const weekResults: WeekResult[] = weekMatches.map((match) => {
       const home: TeamMatchProfile = {
-        id:            match.homeTeamId,
-        name:          match.homeTeam.name,
-        offenseRating: match.homeTeam.offenseRating,
-        defenseRating: match.homeTeam.defenseRating,
-        morale:        match.homeTeam.morale,
-        offenseStyle:  match.homeTeam.offenseStyle,
-        offensivePhilosophy: match.homeTeam.offensivePhilosophy,
-        defenseStyle:  match.homeTeam.defenseStyle,
-        tempo:         match.homeTeam.tempo,
-        coaches:       match.homeTeam.coaches,
-        players:       match.homeTeam.players,
+        id:       match.homeTeamId,
+        name:     match.homeTeam.name,
+        coaches:  match.homeTeam.coaches,
+        players:  match.homeTeam.players,
+        offensivePlays: normalizePlayLoadout('offense', match.homeTeam.offensivePlays),
+        defensivePlays: normalizePlayLoadout('defense', match.homeTeam.defensivePlays),
       };
 
       const away: TeamMatchProfile = {
-        id:            match.awayTeamId,
-        name:          match.awayTeam.name,
-        offenseRating: match.awayTeam.offenseRating,
-        defenseRating: match.awayTeam.defenseRating,
-        morale:        match.awayTeam.morale,
-        offenseStyle:  match.awayTeam.offenseStyle,
-        offensivePhilosophy: match.awayTeam.offensivePhilosophy,
-        defenseStyle:  match.awayTeam.defenseStyle,
-        tempo:         match.awayTeam.tempo,
-        coaches:       match.awayTeam.coaches,
-        players:       match.awayTeam.players,
+        id:       match.awayTeamId,
+        name:     match.awayTeam.name,
+        coaches:  match.awayTeam.coaches,
+        players:  match.awayTeam.players,
+        offensivePlays: normalizePlayLoadout('offense', match.awayTeam.offensivePlays),
+        defensivePlays: normalizePlayLoadout('defense', match.awayTeam.defensivePlays),
       };
 
-      // AI coach picks gameplans for both sides based on the matchup.
-      // (User-controlled teams will later be able to override this pre-match.)
-      const homeGameplan = chooseAIGameplan(home, away);
-      const awayGameplan = chooseAIGameplan(away, home);
+      const homeGameplan = chooseAIGameplan(home);
+      const awayGameplan = chooseAIGameplan(away);
 
       const result = simulateMatch(home, away, week, homeGameplan, awayGameplan);
 
@@ -116,7 +101,6 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
       };
     });
 
-    // Persist scores + gameplans
     await Promise.all(
       weekResults.map((r) =>
         prisma.match.update({
@@ -132,7 +116,6 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
       )
     );
 
-    // Compute morale deltas from this week's outcomes
     const moraleDeltas = new Map<string, number>();
     for (const r of weekResults) {
       if (r.homeScore > r.awayScore) {
@@ -178,7 +161,6 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
     process.stdout.write(`  Week ${wk}/${TOTAL_WEEKS}... done (${weekMatches.length} games)\n`);
   }
 
-  // Final standings per league
   const results: LeagueResult[] = [];
   for (const league of leagues) {
     const played = await prisma.match.findMany({

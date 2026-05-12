@@ -193,7 +193,7 @@ const SchemePicker: React.FC<{
               {scheme.name}
             </Text>
             <Text style={[styles.schemeCount, selected && { color: colors.text.primary }]}>
-              {scheme.plays.length} plays
+              {categorySummary(scheme)}
             </Text>
           </Pressable>
         );
@@ -201,6 +201,14 @@ const SchemePicker: React.FC<{
     </View>
   </View>
 );
+
+function categorySummary(scheme: TeamScheme): string {
+  const counts = new Map<string, number>();
+  for (const play of scheme.playTemplates) {
+    counts.set(play.categoryLabel, (counts.get(play.categoryLabel) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([label, count]) => `${count} ${label}`).join(' · ');
+}
 
 const SelectorRow: React.FC<{
   label:       string;

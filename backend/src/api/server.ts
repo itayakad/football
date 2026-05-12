@@ -7,15 +7,17 @@ import { computePositionGroups } from '../simulation/positionGroups';
 import { recommendGameplan } from '../simulation/aiCoach';
 import { TeamMatchProfile } from '../simulation/matchEngine';
 import { simulateSingleMatch } from './simulateOne';
-import { Gameplan, OFFENSIVE_PHILOSOPHIES, normalizeGameplan } from '../simulation/gameplan';
+import { Gameplan, normalizeGameplan } from '../simulation/gameplan';
 import {
-  defaultPlaysForUnit,
-  normalizePlayIds,
-  normalizeSchemeUnit,
-  PLAY_TEMPLATES,
-  templatesForUnit,
-  SchemeUnit,
-} from '../simulation/playTemplates';
+  ALL_PLAYS,
+  CATEGORY_COLOR,
+  CATEGORY_LABEL,
+  defaultLoadout,
+  normalizePlayLoadout,
+  PlayUnit,
+  playById,
+  playsForUnit,
+} from '../simulation/playLibrary';
 import { computeRecentForm } from './teamForm';
 import { generateNewsFeed } from './newsGenerator';
 import { finalizeCurrentSeason } from '../simulation/seasonHistory';
@@ -30,6 +32,7 @@ app.use(express.json());
 // MVP: hardcoded user team. Real auth comes later — this lets us build the
 // matchday vertical slice without an auth system in the way.
 const USER_TEAM_NAME = process.env.USER_TEAM_NAME ?? 'Dallas Vanguard';
+const OFFENSIVE_PHILOSOPHIES = ['WEST_COAST', 'VERTICAL_SPREAD', 'SMASHMOUTH', 'RPO_HEAVY', 'QUICK_GAME', 'PLAY_ACTION_HEAVY'];
 
 type RosterPlayer = {
   id: string;
@@ -484,24 +487,54 @@ async function ensureDefaultSchemes(teamId: string): Promise<void> {
   const hasDefense = existing.some((scheme) => scheme.unit === 'defense');
   const data = [];
   if (!hasOffense) {
-    data.push({ teamId, unit: 'offense', name: 'Base Offense', plays: defaultPlaysForUnit('offense') as any, isDefault: true });
+    data.push({ teamId, unit: 'offense', name: 'Base Offense', plays: defaultLoadout('offense') as any, isDefault: true });
   }
   if (!hasDefense) {
-    data.push({ teamId, unit: 'defense', name: 'Base Defense', plays: defaultPlaysForUnit('defense') as any, isDefault: true });
+    data.push({ teamId, unit: 'defense', name: 'Base Defense', plays: defaultLoadout('defense') as any, isDefault: true });
   }
   if (data.length > 0) await prisma.teamScheme.createMany({ data, skipDuplicates: true });
 }
 
+function normalizeSchemeUnit(value: unknown): PlayUnit | null {
+  return value === 'offense' || value === 'defense' ? value : null;
+}
+
+function strictPlayIds(unit: PlayUnit, value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.filter((item): item is string => typeof item === 'string');
+  if (ids.length !== 9) return null;
+  const seen = new Set<string>();
+  for (const id of ids) {
+    const play = playById(id);
+    if (!play || play.unit !== unit || seen.has(id)) return null;
+    seen.add(id);
+  }
+  return ids;
+}
+
+function playPayload(play: ReturnType<typeof playById>) {
+  if (!play) return null;
+  return {
+    id: play.id,
+    unit: play.unit,
+    name: play.name,
+    category: play.category,
+    categoryLabel: CATEGORY_LABEL[play.category],
+    categoryColor: CATEGORY_COLOR[play.category],
+    keySlots: play.keySlots,
+  };
+}
+
 function schemePayload(scheme: { id: string; unit: string; name: string; plays: any; isDefault: boolean }) {
   const unit = normalizeSchemeUnit(scheme.unit) ?? 'offense';
-  const playIds = normalizePlayIds(unit, scheme.plays);
+  const playIds = normalizePlayLoadout(unit, scheme.plays);
   return {
     id: scheme.id,
     unit,
     name: scheme.name,
     isDefault: scheme.isDefault,
     plays: playIds,
-    playTemplates: playIds.map((id) => PLAY_TEMPLATES.find((play) => play.id === id)).filter(Boolean),
+    playTemplates: playIds.map((id) => playPayload(playById(id))).filter(Boolean),
   };
 }
 
@@ -749,8 +782,8 @@ app.get('/api/team/:teamId/roster', async (req, res, next) => {
       lineupReadiness,
       schemes: schemes.map(schemePayload),
       playTemplates: {
-        offense: templatesForUnit('offense'),
-        defense: templatesForUnit('defense'),
+        offense: playsForUnit('offense').map((play) => playPayload(play)).filter(Boolean),
+        defense: playsForUnit('defense').map((play) => playPayload(play)).filter(Boolean),
       },
       groups: POSITION_GROUPS.map((group) => ({
         key:     group.key,
@@ -822,7 +855,7 @@ app.get('/api/team/:teamId/schemes', async (req, res, next) => {
     });
     res.json({
       schemes: schemes.map(schemePayload),
-      playTemplates: unit ? templatesForUnit(unit) : PLAY_TEMPLATES,
+      playTemplates: (unit ? playsForUnit(unit) : ALL_PLAYS).map((play) => playPayload(play)).filter(Boolean),
     });
   } catch (e) { next(e); }
 });
@@ -833,8 +866,8 @@ app.post('/api/team/:teamId/schemes', async (req, res, next) => {
     const unit = normalizeSchemeUnit(req.body?.unit);
     const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : null;
     if (!unit || !name) return res.status(400).json({ error: 'unit and name are required' });
-    const plays = normalizePlayIds(unit, req.body?.plays);
-    if (plays.length !== 9) return res.status(400).json({ error: 'Scheme must contain 9 valid plays' });
+    const plays = strictPlayIds(unit, req.body?.plays);
+    if (!plays) return res.status(400).json({ error: 'Scheme must contain exactly 9 unique valid plays' });
 
     const scheme = await prisma.teamScheme.create({
       data: { teamId, unit, name, plays: plays as any, isDefault: false },
@@ -851,7 +884,11 @@ app.patch('/api/team/:teamId/schemes/:schemeId', async (req, res, next) => {
     const unit = normalizeSchemeUnit(existing.unit)!;
     const data: { name?: string; plays?: any; isDefault?: boolean } = {};
     if (typeof req.body?.name === 'string' && req.body.name.trim()) data.name = req.body.name.trim();
-    if (Array.isArray(req.body?.plays)) data.plays = normalizePlayIds(unit, req.body.plays) as any;
+    if (Array.isArray(req.body?.plays)) {
+      const plays = strictPlayIds(unit, req.body.plays);
+      if (!plays) return res.status(400).json({ error: 'Scheme must contain exactly 9 unique valid plays' });
+      data.plays = plays as any;
+    }
     if (typeof req.body?.isDefault === 'boolean') data.isDefault = req.body.isDefault;
     const scheme = await prisma.teamScheme.update({ where: { id: schemeId }, data });
     res.json(schemePayload(scheme));
@@ -1419,32 +1456,22 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
     const myProfile: TeamMatchProfile = {
       id:            myTeam.id,
       name:          myTeam.name,
-      offenseRating: myTeam.offenseRating,
-      defenseRating: myTeam.defenseRating,
-      morale:        myTeam.morale,
-      offenseStyle:  myTeam.offenseStyle,
-      offensivePhilosophy: myTeam.offensivePhilosophy,
-      defenseStyle:  myTeam.defenseStyle,
-      tempo:         myTeam.tempo,
       coaches:       myTeam.coaches,
       players:       startersFromDepth(sortByDepth(myTeam.players)),
+      offensivePlays: normalizePlayLoadout('offense', myTeam.offensivePlays),
+      defensivePlays: normalizePlayLoadout('defense', myTeam.defensivePlays),
     };
 
     const oppProfile: TeamMatchProfile = {
       id:            opp.id,
       name:          opp.name,
-      offenseRating: opp.offenseRating,
-      defenseRating: opp.defenseRating,
-      morale:        opp.morale,
-      offenseStyle:  opp.offenseStyle,
-      offensivePhilosophy: opp.offensivePhilosophy,
-      defenseStyle:  opp.defenseStyle,
-      tempo:         opp.tempo,
       coaches:       opp.coaches,
       players:       startersFromDepth(sortByDepth(opp.players)),
+      offensivePlays: normalizePlayLoadout('offense', opp.offensivePlays),
+      defensivePlays: normalizePlayLoadout('defense', opp.defensivePlays),
     };
 
-    const recommendation = recommendGameplan(myProfile, oppProfile);
+    const recommendation = recommendGameplan(myProfile);
     const oppGroups      = computePositionGroups(startersFromDepth(sortByDepth(opp.players)));
     await ensureDefaultSchemes(myTeam.id);
     const mySchemes = await prisma.teamScheme.findMany({
@@ -1492,8 +1519,8 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
       lineupReadiness,
       schemes: mySchemes.map(schemePayload),
       playTemplates: {
-        offense: templatesForUnit('offense'),
-        defense: templatesForUnit('defense'),
+        offense: playsForUnit('offense').map((play) => playPayload(play)).filter(Boolean),
+        defense: playsForUnit('defense').map((play) => playPayload(play)).filter(Boolean),
       },
     });
   } catch (e) { next(e); }
@@ -1538,15 +1565,10 @@ async function buildSchemeGameplan(teamId: string, offenseSchemeId?: string, def
     schemes.find((scheme) => scheme.unit === 'defense' && scheme.isDefault) ??
     schemes.find((scheme) => scheme.unit === 'defense');
   const raw = {
-    offenseSchemeId: offense?.id ?? null,
-    defenseSchemeId: defense?.id ?? null,
-    offenseSchemeName: offense?.name,
-    defenseSchemeName: defense?.name,
-    offensivePlays: normalizePlayIds('offense', offense?.plays),
-    defensivePlays: normalizePlayIds('defense', defense?.plays),
-    tempoOverride: 'STANDARD',
+    offensivePlays: normalizePlayLoadout('offense', offense?.plays),
+    defensivePlays: normalizePlayLoadout('defense', defense?.plays),
   };
-  return normalizeGameplan(raw, { offenseStyle: 'BALANCED', defenseStyle: 'BALANCED', tempo: 'NORMAL' });
+  return normalizeGameplan(raw);
 }
 
 // ─── GET /api/match/:matchId ──────────────────────────────
@@ -1563,8 +1585,8 @@ app.get('/api/match/:matchId', async (req, res, next) => {
     if (!match) return res.status(404).json({ error: 'Match not found' });
     res.json({
       ...match,
-      homeGameplan: normalizeGameplan(match.homeGameplan, match.homeTeam),
-      awayGameplan: normalizeGameplan(match.awayGameplan, match.awayTeam),
+      homeGameplan: normalizeGameplan(match.homeGameplan),
+      awayGameplan: normalizeGameplan(match.awayGameplan),
     });
   } catch (e) { next(e); }
 });

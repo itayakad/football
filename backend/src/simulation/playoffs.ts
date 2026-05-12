@@ -1,6 +1,7 @@
 import { prisma } from '../db';
 import { simulateMatch, TeamMatchProfile } from './matchEngine';
 import { chooseAIGameplan } from './aiCoach';
+import { normalizePlayLoadout } from './playLibrary';
 
 export type PlayoffRound = 'WILD_CARD' | 'SEMI' | 'FINAL';
 
@@ -49,20 +50,14 @@ interface SeededTeam {
 interface TeamLike {
   id: string;
   name: string;
-  offenseRating: number;
-  defenseRating: number;
-  morale: number;
-  offenseStyle: string;
-  offensivePhilosophy: string;
-  defenseStyle: string;
-  tempo: string;
+  offensivePlays: unknown;
+  defensivePlays: unknown;
   coaches: Array<{
     role: string;
-    philosophy: string;
+    overall: number;
+    offenseRating: number;
+    defenseRating: number;
     reputation: number;
-    aggression: number;
-    developmentSpecialty: string;
-    preferredTempo: string;
   }>;
   players: Array<{
     id: string;
@@ -139,34 +134,24 @@ async function playPlayoffMatch(
   week: number,
 ): Promise<PlayoffMatchOutcome> {
   const homeProfile: TeamMatchProfile = {
-    id:            home.team.id,
-    name:          home.team.name,
-    offenseRating: home.team.offenseRating,
-    defenseRating: home.team.defenseRating,
-    morale:        home.team.morale,
-    offenseStyle:  home.team.offenseStyle,
-    offensivePhilosophy: home.team.offensivePhilosophy,
-    defenseStyle:  home.team.defenseStyle,
-    tempo:         home.team.tempo,
-    coaches:       home.team.coaches,
-    players:       home.team.players,
+    id:       home.team.id,
+    name:     home.team.name,
+    coaches:  home.team.coaches as any,
+    players:  home.team.players,
+    offensivePlays: normalizePlayLoadout('offense', home.team.offensivePlays),
+    defensivePlays: normalizePlayLoadout('defense', home.team.defensivePlays),
   };
   const awayProfile: TeamMatchProfile = {
-    id:            away.team.id,
-    name:          away.team.name,
-    offenseRating: away.team.offenseRating,
-    defenseRating: away.team.defenseRating,
-    morale:        away.team.morale,
-    offenseStyle:  away.team.offenseStyle,
-    offensivePhilosophy: away.team.offensivePhilosophy,
-    defenseStyle:  away.team.defenseStyle,
-    tempo:         away.team.tempo,
-    coaches:       away.team.coaches,
-    players:       away.team.players,
+    id:       away.team.id,
+    name:     away.team.name,
+    coaches:  away.team.coaches as any,
+    players:  away.team.players,
+    offensivePlays: normalizePlayLoadout('offense', away.team.offensivePlays),
+    defensivePlays: normalizePlayLoadout('defense', away.team.defensivePlays),
   };
 
-  const homeGameplan = chooseAIGameplan(homeProfile, awayProfile);
-  const awayGameplan = chooseAIGameplan(awayProfile, homeProfile);
+  const homeGameplan = chooseAIGameplan(homeProfile);
+  const awayGameplan = chooseAIGameplan(awayProfile);
   const result = simulateMatch(homeProfile, awayProfile, week, homeGameplan, awayGameplan);
 
   // Tied game: simulateMatch already breaks ties via OT, but if it ever comes back tied,

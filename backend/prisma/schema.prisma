@@ -53,6 +53,10 @@ model Team {
   offensivePhilosophy OffensivePhilosophy @default(WEST_COAST)
   defenseStyle  DefenseStyle @default(BALANCED)
   tempo         Tempo        @default(NORMAL)
+  // Team's 9-play loadouts. Identity is determined entirely by these picks.
+  // Stored as Json arrays of play IDs; backend validates against playLibrary.
+  offensivePlays Json?
+  defensivePlays Json?
   money         Int          @default(150000000)
   morale        Int          @default(70)
   // Per-week cooldowns for staff actions. Stores the week number the action
@@ -95,6 +99,14 @@ model Coach {
   moraleImpact          Int
   preferredTempo        Tempo
   reputation            Int
+  // Coach OVRs used by the play-driven engine.
+  //   - HEAD_COACH: overall (general); offenseRating + defenseRating drive
+  //     the offensive/defensive playcalling RNG buckets respectively.
+  //   - OC / DC: overall is a play-strength multiplier in the engine.
+  //   - Other roles: unused at sim time.
+  overall               Int      @default(60)
+  offenseRating         Int      @default(60)
+  defenseRating         Int      @default(60)
   careerWins            Int      @default(0)
   careerLosses          Int      @default(0)
   titles                Int      @default(0)

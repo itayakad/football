@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { simulateMatch, TeamMatchProfile, MatchSimResult } from '../simulation/matchEngine';
 import { Gameplan, normalizeGameplan } from '../simulation/gameplan';
 import { chooseAIGameplan } from '../simulation/aiCoach';
+import { normalizePlayLoadout } from '../simulation/playLibrary';
 import { generateMatchFeed, FeedEvent } from './feedGenerator';
 import { buildPostMatchHealthUpdates } from '../simulation/playerHealth';
 import { advanceOffseason, OffseasonResult } from '../simulation/offseason';
@@ -26,7 +27,7 @@ export interface SingleMatchResult {
 const MORALE_SWING = 5;
 
 const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
-  QB: 1, RB: 2, WR: 2, TE: 1, OL: 5, DE: 2, DT: 2, LB: 3, CB: 2, S: 2,
+  QB: 1, RB: 2, WR: 3, TE: 1, OL: 5, DE: 2, DT: 2, LB: 3, CB: 3, S: 2,
 };
 
 function activeDepthPlayers<T extends { id: string; position: string; overall: number; depthOrder?: number | null }>(players: T[]): T[] {
@@ -45,8 +46,6 @@ function activeDepthPlayers<T extends { id: string; position: string; overall: n
   });
 }
 
-// Simulate a single match (vs the season runner that does all 168 games).
-// Powers the matchday flow: user picks gameplan, hits Simulate, this runs.
 export async function simulateSingleMatch(
   matchId:      string,
   userTeamId?:  string,
@@ -64,49 +63,37 @@ export async function simulateSingleMatch(
   if (match.played)  throw new Error('Match already played');
 
   const home: TeamMatchProfile = {
-    id:            match.homeTeamId,
-    name:          match.homeTeam.name,
-    offenseRating: match.homeTeam.offenseRating,
-    defenseRating: match.homeTeam.defenseRating,
-    morale:        match.homeTeam.morale,
-    offenseStyle:  match.homeTeam.offenseStyle,
-    offensivePhilosophy: match.homeTeam.offensivePhilosophy,
-    defenseStyle:  match.homeTeam.defenseStyle,
-    tempo:         match.homeTeam.tempo,
-    coaches:       match.homeTeam.coaches,
-    players:       activeDepthPlayers(match.homeTeam.players),
+    id:       match.homeTeamId,
+    name:     match.homeTeam.name,
+    coaches:  match.homeTeam.coaches,
+    players:  activeDepthPlayers(match.homeTeam.players),
+    offensivePlays: normalizePlayLoadout('offense', match.homeTeam.offensivePlays),
+    defensivePlays: normalizePlayLoadout('defense', match.homeTeam.defensivePlays),
   };
 
   const away: TeamMatchProfile = {
-    id:            match.awayTeamId,
-    name:          match.awayTeam.name,
-    offenseRating: match.awayTeam.offenseRating,
-    defenseRating: match.awayTeam.defenseRating,
-    morale:        match.awayTeam.morale,
-    offenseStyle:  match.awayTeam.offenseStyle,
-    offensivePhilosophy: match.awayTeam.offensivePhilosophy,
-    defenseStyle:  match.awayTeam.defenseStyle,
-    tempo:         match.awayTeam.tempo,
-    coaches:       match.awayTeam.coaches,
-    players:       activeDepthPlayers(match.awayTeam.players),
+    id:       match.awayTeamId,
+    name:     match.awayTeam.name,
+    coaches:  match.awayTeam.coaches,
+    players:  activeDepthPlayers(match.awayTeam.players),
+    offensivePlays: normalizePlayLoadout('offense', match.awayTeam.offensivePlays),
+    defensivePlays: normalizePlayLoadout('defense', match.awayTeam.defensivePlays),
   };
 
-  // User overrides their team's gameplan; AI coach picks for the other side.
   const isUserHome = userTeamId === match.homeTeamId;
   const isUserAway = userTeamId === match.awayTeamId;
   if (isUserHome && hasOutStarter(match.homeTeam.players)) throw new Error('Out starter must be subbed out');
   if (isUserAway && hasOutStarter(match.awayTeam.players)) throw new Error('Out starter must be subbed out');
 
   const homeGameplan: Gameplan = isUserHome && userGameplan
-    ? normalizeGameplan(userGameplan, home)
-    : chooseAIGameplan(home, away);
+    ? normalizeGameplan(userGameplan)
+    : chooseAIGameplan(home);
   const awayGameplan: Gameplan = isUserAway && userGameplan
-    ? normalizeGameplan(userGameplan, away)
-    : chooseAIGameplan(away, home);
+    ? normalizeGameplan(userGameplan)
+    : chooseAIGameplan(away);
 
   const result: MatchSimResult = simulateMatch(home, away, match.week, homeGameplan, awayGameplan);
 
-  // Persist match outcome
   await prisma.match.update({
     where: { id: matchId },
     data:  {
@@ -118,40 +105,17 @@ export async function simulateSingleMatch(
     },
   });
 
-  // Update morale (winner +5, loser -5, clamped 0-100)
   const moraleChange = await updateMoraleAfterMatch(match.homeTeamId, match.awayTeamId, result.homeScore, result.awayScore);
   const injuryReport = await updatePlayerHealthAfterMatch(
-    {
-      id: match.homeTeamId,
-      offenseStyle: match.homeTeam.offenseStyle,
-      defenseStyle: match.homeTeam.defenseStyle,
-      tempo: match.homeTeam.tempo,
-      players: match.homeTeam.players,
-    },
-    {
-      id: match.awayTeamId,
-      offenseStyle: match.awayTeam.offenseStyle,
-      defenseStyle: match.awayTeam.defenseStyle,
-      tempo: match.awayTeam.tempo,
-      players: match.awayTeam.players,
-    },
+    { id: match.homeTeamId, offenseStyle: match.homeTeam.offenseStyle, defenseStyle: match.homeTeam.defenseStyle, tempo: match.homeTeam.tempo, players: match.homeTeam.players },
+    { id: match.awayTeamId, offenseStyle: match.awayTeam.offenseStyle, defenseStyle: match.awayTeam.defenseStyle, tempo: match.awayTeam.tempo, players: match.awayTeam.players },
     homeGameplan,
     awayGameplan,
   );
 
   const events = generateMatchFeed(
-    {
-      name: match.homeTeam.name,
-      offenseStyle: match.homeTeam.offenseStyle,
-      defenseStyle: match.homeTeam.defenseStyle,
-      topPlayers: pickTopPlayers(match.homeTeam.players),
-    },
-    {
-      name: match.awayTeam.name,
-      offenseStyle: match.awayTeam.offenseStyle,
-      defenseStyle: match.awayTeam.defenseStyle,
-      topPlayers: pickTopPlayers(match.awayTeam.players),
-    },
+    { name: match.homeTeam.name, side: 'home', topPlayers: pickTopPlayers(match.homeTeam.players) },
+    { name: match.awayTeam.name, side: 'away', topPlayers: pickTopPlayers(match.awayTeam.players) },
     result,
   );
 
@@ -193,33 +157,23 @@ async function simulateRestOfWeek(week: number, excludeMatchId: string): Promise
 
   for (const m of others) {
     const home: TeamMatchProfile = {
-      id:            m.homeTeamId,
-      name:          m.homeTeam.name,
-      offenseRating: m.homeTeam.offenseRating,
-      defenseRating: m.homeTeam.defenseRating,
-      morale:        m.homeTeam.morale,
-        offenseStyle:  m.homeTeam.offenseStyle,
-        offensivePhilosophy: m.homeTeam.offensivePhilosophy,
-        defenseStyle:  m.homeTeam.defenseStyle,
-        tempo:         m.homeTeam.tempo,
-        coaches:       m.homeTeam.coaches,
-        players:       activeDepthPlayers(m.homeTeam.players),
+      id:       m.homeTeamId,
+      name:     m.homeTeam.name,
+      coaches:  m.homeTeam.coaches,
+      players:  activeDepthPlayers(m.homeTeam.players),
+      offensivePlays: normalizePlayLoadout('offense', m.homeTeam.offensivePlays),
+      defensivePlays: normalizePlayLoadout('defense', m.homeTeam.defensivePlays),
     };
     const away: TeamMatchProfile = {
-      id:            m.awayTeamId,
-      name:          m.awayTeam.name,
-      offenseRating: m.awayTeam.offenseRating,
-      defenseRating: m.awayTeam.defenseRating,
-      morale:        m.awayTeam.morale,
-        offenseStyle:  m.awayTeam.offenseStyle,
-        offensivePhilosophy: m.awayTeam.offensivePhilosophy,
-        defenseStyle:  m.awayTeam.defenseStyle,
-        tempo:         m.awayTeam.tempo,
-        coaches:       m.awayTeam.coaches,
-        players:       activeDepthPlayers(m.awayTeam.players),
+      id:       m.awayTeamId,
+      name:     m.awayTeam.name,
+      coaches:  m.awayTeam.coaches,
+      players:  activeDepthPlayers(m.awayTeam.players),
+      offensivePlays: normalizePlayLoadout('offense', m.awayTeam.offensivePlays),
+      defensivePlays: normalizePlayLoadout('defense', m.awayTeam.defensivePlays),
     };
-    const homeGameplan = chooseAIGameplan(home, away);
-    const awayGameplan = chooseAIGameplan(away, home);
+    const homeGameplan = chooseAIGameplan(home);
+    const awayGameplan = chooseAIGameplan(away);
     const r = simulateMatch(home, away, m.week, homeGameplan, awayGameplan);
 
     await prisma.match.update({
@@ -246,9 +200,6 @@ async function simulateRestOfWeek(week: number, excludeMatchId: string): Promise
 function pickTopPlayers(players: Array<{ name: string; position: string; overall: number }>) {
   const byOverall = [...players].sort((a, b) => b.overall - a.overall);
   const result = byOverall.slice(0, 5).map((p) => ({ name: p.name, position: p.position, overall: p.overall }));
-
-  // Supplement with a best-at-position pick for narrative coverage when the top
-  // 5 by overall don't include obvious skill spots.
   const fills = ['QB', 'RB', 'WR'];
   for (const pos of fills) {
     if (result.some((p) => p.position === pos)) continue;

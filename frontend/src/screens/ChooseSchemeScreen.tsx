@@ -1,10 +1,10 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { RouteProp, useRoute } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../api/client';
-import { PlayTemplate, TeamScheme } from '../api/types';
+import { PlayTemplate, RosterPlayer, TeamScheme } from '../api/types';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
@@ -21,10 +21,18 @@ export const ChooseSchemeScreen: React.FC = () => {
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [draftName, setDraftName] = React.useState('');
   const [draftPlays, setDraftPlays] = React.useState<string[]>([]);
+  const [selectedPlayId, setSelectedPlayId] = React.useState<string | null>(null);
+  const [showSubOptions, setShowSubOptions] = React.useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['schemes', userTeamId, unit],
     queryFn: () => api.schemes(userTeamId!, unit),
+    enabled: !!userTeamId,
+  });
+
+  const { data: rosterData } = useQuery({
+    queryKey: ['roster', userTeamId],
+    queryFn: () => api.roster(userTeamId!),
     enabled: !!userTeamId,
   });
 
@@ -37,6 +45,8 @@ export const ChooseSchemeScreen: React.FC = () => {
     setActiveId(active.id);
     setDraftName(active.name);
     setDraftPlays(active.plays);
+    setSelectedPlayId(null);
+    setShowSubOptions(false);
   }, [active?.id]);
 
   const refresh = () => {
@@ -71,6 +81,8 @@ export const ChooseSchemeScreen: React.FC = () => {
     },
   });
 
+  const slotMap = React.useMemo(() => buildSlotMap(rosterData?.groups.flatMap((group) => group.players) ?? []), [rosterData]);
+
   if (!userTeamId || isLoading) {
     return <ScreenContainer><ActivityIndicator color={colors.accent.primary} style={{ marginTop: spacing.xxxl }} /></ScreenContainer>;
   }
@@ -78,13 +90,31 @@ export const ChooseSchemeScreen: React.FC = () => {
     return <ScreenContainer><Text style={typography.body}>Failed to load schemes.</Text></ScreenContainer>;
   }
 
-  const togglePlay = (playId: string) => {
-    if (draftPlays.includes(playId)) {
-      if (draftPlays.length <= 9) return;
-      setDraftPlays(draftPlays.filter((id) => id !== playId).slice(0, 9));
-      return;
-    }
-    setDraftPlays([playId, ...draftPlays].slice(0, 9));
+  const selectedTemplates = draftPlays
+    .map((id) => templates.find((template) => template.id === id))
+    .filter((template): template is PlayTemplate => !!template);
+  const selectedIds = new Set(draftPlays);
+  const availableTemplates = templates.filter((template) => !selectedIds.has(template.id));
+  const selectedPlay = selectedPlayId ? templates.find((template) => template.id === selectedPlayId) ?? null : null;
+  const selectedPlayIsInScheme = selectedPlay ? selectedIds.has(selectedPlay.id) : false;
+
+  const replacePlay = (nextPlayId: string) => {
+    if (!selectedPlayId || draftPlays.includes(nextPlayId)) return;
+    setDraftPlays(draftPlays.map((id) => (id === selectedPlayId ? nextPlayId : id)));
+    setSelectedPlayId(null);
+    setShowSubOptions(false);
+  };
+
+  const replaceSelectedSlot = (currentSelectedId: string) => {
+    if (!selectedPlayId || selectedIds.has(selectedPlayId) || !draftPlays.includes(currentSelectedId)) return;
+    setDraftPlays(draftPlays.map((id) => (id === currentSelectedId ? selectedPlayId : id)));
+    setSelectedPlayId(null);
+    setShowSubOptions(false);
+  };
+
+  const openPlay = (playId: string) => {
+    setSelectedPlayId(playId);
+    setShowSubOptions(false);
   };
 
   return (
@@ -131,94 +161,281 @@ export const ChooseSchemeScreen: React.FC = () => {
       </Card>
 
       <View>
-        <SectionLabel>Play Library</SectionLabel>
-        <View style={styles.playGrid}>
-          {templates.map((template) => {
-            const rank = draftPlays.indexOf(template.id);
-            return (
-              <PlayCard
-                key={template.id}
-                template={template}
-                selected={rank >= 0}
-                rank={rank + 1}
-                onPress={() => togglePlay(template.id)}
-              />
-            );
-          })}
+        <View style={styles.sectionHeader}>
+          <SectionLabel>Selected Plays</SectionLabel>
+          <Text style={[typography.caption, draftPlays.length === 9 ? styles.countReady : styles.countWarning]}>
+            {draftPlays.length}/9
+          </Text>
         </View>
+        <Card padded={false}>
+          {selectedTemplates.map((template, index) => (
+            <PlayRow
+              key={template.id}
+              template={template}
+              slotMap={slotMap}
+              isLast={index === selectedTemplates.length - 1}
+              onPress={() => openPlay(template.id)}
+            />
+          ))}
+        </Card>
       </View>
+
+      <View>
+        <SectionLabel>Available Plays</SectionLabel>
+        <Card padded={false}>
+          {availableTemplates.map((template, index) => (
+            <PlayRow
+              key={template.id}
+              template={template}
+              slotMap={slotMap}
+              isLast={index === availableTemplates.length - 1}
+              onPress={() => openPlay(template.id)}
+            />
+          ))}
+        </Card>
+      </View>
+
+      <ReplacePlaySheet
+        play={selectedPlay}
+        isSelected={selectedPlayIsInScheme}
+        slotMap={slotMap}
+        options={selectedPlayIsInScheme ? availableTemplates : selectedTemplates}
+        showSubOptions={showSubOptions}
+        onShowSubOptions={() => setShowSubOptions(true)}
+        onReplace={replacePlay}
+        onReplaceSelectedSlot={replaceSelectedSlot}
+        onClose={() => setSelectedPlayId(null)}
+      />
     </ScreenContainer>
   );
 };
 
-export function PlayCard({
+function PlayRow({
   template,
-  selected,
-  rank,
+  slotMap,
+  disabled,
+  isLast,
   onPress,
 }: {
   template: PlayTemplate;
-  selected?: boolean;
-  rank?: number;
+  slotMap: Record<string, RosterPlayer | undefined>;
+  disabled?: boolean;
+  isLast?: boolean;
   onPress?: () => void;
 }) {
+  const overall = playOverall(template, slotMap);
   return (
-    <Pressable disabled={!onPress} onPress={onPress} style={[styles.playCard, { borderColor: familyColor(template.family) }, selected && styles.playCardSelected]}>
-      <View style={styles.playHeader}>
-        <Text style={styles.playName} numberOfLines={1}>{rank && rank > 0 ? `${rank}. ` : ''}{template.name}</Text>
-        <Text style={[styles.familyText, { color: familyColor(template.family) }]}>{familyLabel(template.family)}</Text>
+    <Pressable disabled={disabled || !onPress} onPress={onPress} style={[styles.playRow, !isLast && styles.playRowBorder, disabled && styles.playRowDisabled]}>
+      <View style={[styles.categoryStripe, { backgroundColor: template.categoryColor }]} />
+      <View style={styles.playRowMain}>
+        <View style={styles.playRowTitle}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.playName} numberOfLines={1}>{template.name}</Text>
+            <Text style={[styles.familyText, { color: template.categoryColor }]}>{template.categoryLabel}</Text>
+          </View>
+        </View>
+        <View style={styles.rowOvrBlock}>
+          <Text style={styles.rowOvrText}>{overall ?? '--'}</Text>
+          <Text style={styles.rowOvrLabel}>OVR</Text>
+        </View>
       </View>
-      <Diagram template={template} />
     </Pressable>
   );
 }
 
-function Diagram({ template }: { template: PlayTemplate }) {
+function ReplacePlaySheet({
+  play,
+  isSelected,
+  slotMap,
+  options,
+  showSubOptions,
+  onShowSubOptions,
+  onReplace,
+  onReplaceSelectedSlot,
+  onClose,
+}: {
+  play: PlayTemplate | null;
+  isSelected: boolean;
+  slotMap: Record<string, RosterPlayer | undefined>;
+  options: PlayTemplate[];
+  showSubOptions: boolean;
+  onShowSubOptions: () => void;
+  onReplace: (playId: string) => void;
+  onReplaceSelectedSlot: (playId: string) => void;
+  onClose: () => void;
+}) {
+  if (!play) return null;
+  const playOvr = playOverall(play, slotMap);
   return (
-    <View style={styles.diagram}>
-      <View style={styles.los} />
-      {template.diagram.map((path, pathIndex) => (
-        <React.Fragment key={`${path.label}-${pathIndex}`}>
-          {path.points.slice(1).map((point, index) => (
-            <Segment key={index} from={path.points[index]} to={point} color={path.color} />
-          ))}
-        </React.Fragment>
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.sheet}>
+          <View style={styles.detailCard}>
+            <View style={styles.detailTopRow}>
+              <View style={styles.playOvrBlock}>
+                <Text style={styles.ovrNumber}>{playOvr ?? '--'}</Text>
+                <Text style={styles.ovrLabel}>OVR</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={typography.label}>{play.categoryLabel}</Text>
+                <Text style={styles.sheetTitle}>{play.name}</Text>
+              </View>
+              <View style={styles.detailActionBlock}>
+                <Pressable
+                  onPress={onShowSubOptions}
+                  style={styles.subButton}
+                >
+                  <Text style={styles.subButtonText}>Sub</Text>
+                </Pressable>
+                {isSelected && <Text style={styles.selectedText}>Selected</Text>}
+              </View>
+            </View>
+
+            <PlaySketch play={play} />
+
+            <View style={styles.playerChipRow}>
+              {play.keySlots.map((slot) => {
+                const player = slotMap[slot];
+                return (
+                  <View key={slot} style={styles.playerChip}>
+                    <View style={styles.playerIcon}>
+                      <Text style={styles.playerIconText}>{player ? initials(player.name) : slot.slice(0, 2)}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.playerName} numberOfLines={1}>{player ? shortName(player.name) : slot}</Text>
+                      <Text style={styles.slotText}>{slot}{player ? ` / ${player.overall}` : ''}</Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
+          {showSubOptions && (
+            <ScrollView contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
+              <SectionLabel>{isSelected ? 'Eligible Plays' : 'Replace Selected Play'}</SectionLabel>
+              {options.map((option) => {
+                const optionOvr = playOverall(option, slotMap);
+                return (
+                  <Pressable
+                    key={option.id}
+                    style={styles.subOptionRow}
+                    onPress={() => isSelected ? onReplace(option.id) : onReplaceSelectedSlot(option.id)}
+                  >
+                    <View style={styles.smallOvrBlock}>
+                      <Text style={styles.smallOvrText}>{optionOvr ?? '--'}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.playName}>{option.name}</Text>
+                      <Text style={styles.slotText}>{option.keySlots.join(' / ')}</Text>
+                    </View>
+                    <Text style={[styles.familyText, { color: option.categoryColor }]}>{option.categoryLabel}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          )}
+
+          <Pressable onPress={onClose} style={styles.closeSheetButton}>
+            <Text style={styles.closeSheetText}>Close</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function PlaySketch({ play }: { play: PlayTemplate }) {
+  const isOffense = play.unit === 'offense';
+  const laneColor = play.categoryColor;
+  const lanes = isOffense
+    ? [
+        { left: '16%', top: '64%', width: '26%', rotate: '-24deg' },
+        { left: '42%', top: '62%', width: '30%', rotate: play.category === 'RUNNING' ? '4deg' : '-42deg' },
+        { left: '58%', top: '64%', width: '24%', rotate: '28deg' },
+      ]
+    : [
+        { left: '18%', top: '36%', width: '24%', rotate: '18deg' },
+        { left: '40%', top: '34%', width: '28%', rotate: '90deg' },
+        { left: '62%', top: '36%', width: '24%', rotate: '-18deg' },
+      ];
+  return (
+    <View style={styles.sketch}>
+      <View style={styles.sketchLine} />
+      <View style={[styles.sketchBall, { top: isOffense ? '70%' : '28%' }]} />
+      {lanes.map((lane, index) => (
+        <View
+          key={index}
+          style={[
+            styles.sketchLane,
+            {
+              left: lane.left as any,
+              top: lane.top as any,
+              width: lane.width as any,
+              backgroundColor: laneColor,
+              transform: [{ rotate: lane.rotate }],
+            },
+          ]}
+        />
       ))}
     </View>
   );
 }
 
-function Segment({ from, to, color }: { from: [number, number]; to: [number, number]; color: string }) {
-  const dx = to[0] - from[0];
-  const dy = to[1] - from[1];
-  const length = Math.sqrt(dx * dx + dy * dy);
-  const angle = Math.atan2(dy, dx) * (180 / Math.PI);
-  return (
-    <View
-      style={[
-        styles.segment,
-        {
-          left: `${from[0]}%`,
-          top: `${from[1]}%`,
-          width: `${length}%`,
-          backgroundColor: color,
-          transform: [{ rotate: `${angle}deg` }],
-        },
-      ]}
-    />
-  );
+function buildSlotMap(players: RosterPlayer[]): Record<string, RosterPlayer | undefined> {
+  const byPosition = (position: string) => players
+    .filter((player) => player.position === position)
+    .sort((a, b) => (a.depthOrder ?? 999) - (b.depthOrder ?? 999) || b.overall - a.overall);
+  const qb = byPosition('QB');
+  const rb = byPosition('RB');
+  const wr = byPosition('WR');
+  const te = byPosition('TE');
+  const ol = byPosition('OL');
+  const de = byPosition('DE');
+  const dt = byPosition('DT');
+  const lb = byPosition('LB');
+  const cb = byPosition('CB');
+  const s = byPosition('S');
+  return {
+    QB: qb[0],
+    RB: rb[0],
+    WR1: wr[0],
+    WR2: wr[1],
+    SLOT: wr[2],
+    TE: te[0],
+    LT: ol[0],
+    LG: ol[1],
+    C: ol[2],
+    RG: ol[3],
+    RT: ol[4],
+    EDGE1: de[0],
+    EDGE2: de[1],
+    DT1: dt[0],
+    DT2: dt[1],
+    MLB: lb[0],
+    WLB: lb[1],
+    SLB: lb[2],
+    CB1: cb[0],
+    CB2: cb[1],
+    NCB: cb[2],
+    FS: s[0],
+    SS: s[1],
+  };
 }
 
-function familyLabel(family: string): string {
-  return family.replace(/_/g, ' ');
+function playOverall(play: PlayTemplate, slotMap: Record<string, RosterPlayer | undefined>): number | null {
+  const players = play.keySlots.map((slot) => slotMap[slot]).filter((player): player is RosterPlayer => !!player);
+  if (players.length === 0) return null;
+  return Math.round(players.reduce((sum, player) => sum + player.overall, 0) / players.length);
 }
 
-function familyColor(family: string): string {
-  if (family.includes('RUN')) return colors.identity.run;
-  if (family.includes('PASS') || family === 'PLAY_ACTION') return colors.identity.pass;
-  if (family.includes('BLITZ')) return colors.identity.agg;
-  if (family.includes('ZONE') || family.includes('MAN')) return colors.identity.prv;
-  return colors.identity.bal;
+function initials(name: string): string {
+  return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+}
+
+function shortName(name: string): string {
+  const [first, ...rest] = name.split(' ');
+  return `${first.charAt(0)}. ${rest.join(' ') || first}`.trim();
 }
 
 const styles = StyleSheet.create({
@@ -286,25 +503,50 @@ const styles = StyleSheet.create({
     ...typography.label,
     color: colors.danger,
   },
-  playGrid: {
+  sectionHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  playCard: {
-    width: '31.5%',
-    minWidth: 108,
-    borderRadius: radius.md,
-    borderWidth: 2,
-    padding: spacing.sm,
+  countReady: {
+    color: colors.success,
+    fontWeight: '800',
+  },
+  countWarning: {
+    color: colors.warn,
+    fontWeight: '800',
+  },
+  playRow: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.bg.elevated,
+    overflow: 'hidden',
   },
-  playCardSelected: {
-    backgroundColor: colors.bg.surface,
+  playRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  playHeader: {
-    minHeight: 42,
-    gap: spacing.xs,
+  playRowDisabled: {
+    opacity: 0.58,
+  },
+  categoryStripe: {
+    width: 4,
+    alignSelf: 'stretch',
+  },
+  playRowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  playRowTitle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
   },
   playName: {
     ...typography.caption,
@@ -315,24 +557,216 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
   },
-  diagram: {
-    height: 92,
+  rowOvrBlock: {
+    width: 48,
+    minHeight: 42,
     borderRadius: radius.sm,
+    backgroundColor: colors.bg.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowOvrText: {
+    ...typography.heading,
+    color: colors.accent.primary,
+    fontSize: 18,
+  },
+  rowOvrLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  slotText: {
+    ...typography.caption,
+    color: colors.text.muted,
+    marginBottom: spacing.xs,
+    fontSize: 10,
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.62)',
+  },
+  sheet: {
+    maxHeight: '82%',
+    backgroundColor: colors.bg.elevated,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.lg,
+  },
+  detailCard: {
+    gap: spacing.md,
+  },
+  detailTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  playOvrBlock: {
+    width: 58,
+    minHeight: 58,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ovrNumber: {
+    ...typography.heading,
+    color: colors.accent.primary,
+    fontSize: 24,
+  },
+  ovrLabel: {
+    ...typography.caption,
+    color: colors.text.muted,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  detailActionBlock: {
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  subButton: {
+    minWidth: 58,
+    minHeight: 36,
+    borderRadius: radius.sm,
+    backgroundColor: colors.accent.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  subButtonText: {
+    ...typography.label,
+    color: colors.bg.base,
+    fontWeight: '800',
+  },
+  selectedText: {
+    ...typography.caption,
+    color: colors.success,
+    fontWeight: '800',
+  },
+  sketch: {
+    height: 150,
+    borderRadius: radius.md,
     backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: colors.border,
     overflow: 'hidden',
   },
-  los: {
+  sketchLine: {
     position: 'absolute',
-    left: '0%',
-    right: '0%',
-    top: '74%',
+    left: '8%',
+    right: '8%',
+    top: '50%',
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
-  segment: {
+  sketchBall: {
     position: 'absolute',
-    height: 3,
+    left: '48%',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: colors.text.secondary,
+  },
+  sketchLane: {
+    position: 'absolute',
+    height: 4,
     borderRadius: 2,
     transformOrigin: 'left center' as any,
+  },
+  playerChipRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  playerChip: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  playerIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.bg.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playerIconText: {
+    ...typography.caption,
+    color: colors.text.primary,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  playerName: {
+    ...typography.caption,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  smallOvrBlock: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bg.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  smallOvrText: {
+    ...typography.heading,
+    color: colors.accent.primary,
+    fontSize: 16,
+  },
+  closeSheetButton: {
+    minHeight: 42,
+    borderRadius: radius.md,
+    backgroundColor: colors.bg.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeSheetText: {
+    ...typography.label,
+    color: colors.text.primary,
+    fontWeight: '800',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+  },
+  sheetTitle: {
+    ...typography.title,
+    fontSize: 22,
+  },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.bg.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeText: {
+    ...typography.heading,
+    color: colors.text.secondary,
+  },
+  subOptionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing.md,
+    backgroundColor: colors.bg.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.md,
   },
 });

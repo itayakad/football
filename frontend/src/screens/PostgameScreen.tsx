@@ -14,6 +14,7 @@ import { SectionLabel } from '../components/SectionLabel';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/types';
 import { lastSim } from '../state/lastSim';
+import { playById } from '../data/playTemplates';
 
 export const PostgameScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -118,23 +119,13 @@ export const PostgameScreen: React.FC = () => {
         <View style={styles.gameplanRow}>
           <Text style={[typography.caption, { width: 80 }]}>{result.homeTeamName}</Text>
           <View style={styles.pillRow}>
-            {result.homeGameplan.offensiveConcepts.map((concept) => (
-              <Pill key={concept} label={pillLabel(concept)} color={pillColor(concept)} />
-            ))}
-            {result.homeGameplan.defensiveCounters.map((counter) => (
-              <Pill key={counter} label={pillLabel(counter)} color={pillColor(counter)} />
-            ))}
+            {gameplanPills(result.homeGameplan.offensivePlays, result.homeGameplan.defensivePlays)}
           </View>
         </View>
         <View style={styles.gameplanRow}>
           <Text style={[typography.caption, { width: 80 }]}>{result.awayTeamName}</Text>
           <View style={styles.pillRow}>
-            {result.awayGameplan.offensiveConcepts.map((concept) => (
-              <Pill key={concept} label={pillLabel(concept)} color={pillColor(concept)} />
-            ))}
-            {result.awayGameplan.defensiveCounters.map((counter) => (
-              <Pill key={counter} label={pillLabel(counter)} color={pillColor(counter)} />
-            ))}
+            {gameplanPills(result.awayGameplan.offensivePlays, result.awayGameplan.defensivePlays)}
           </View>
         </View>
       </Card>
@@ -187,6 +178,19 @@ export const PostgameScreen: React.FC = () => {
     </ScreenContainer>
   );
 };
+
+function gameplanPills(offensivePlays: string[], defensivePlays: string[]) {
+  return [...offensivePlays, ...defensivePlays].map((id) => {
+    const play = playById(id);
+    return (
+      <Pill
+        key={id}
+        label={play ? play.categoryLabel : pillLabel(id)}
+        color={play?.categoryColor ?? pillColor(id)}
+      />
+    );
+  });
+}
 
 const styles = StyleSheet.create({
   scoreRow: {

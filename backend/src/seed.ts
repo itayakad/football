@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { prisma } from './db';
 import { generateRoundRobin } from './simulation/scheduleGenerator';
+import { DEFENSIVE_PLAYS, OFFENSIVE_PLAYS, PlayCategory } from './simulation/playLibrary';
 
 // ─── Name Data ────────────────────────────────────────────
 
@@ -177,6 +178,8 @@ export async function seedWorld(): Promise<void> {
             offensivePhilosophy: philosophyForStyle(c.offenseStyle) as any,
             defenseStyle:  c.defenseStyle as any,
             tempo:         c.tempo as any,
+            offensivePlays: offensiveLoadoutForStyle(c.offenseStyle) as any,
+            defensivePlays: defensiveLoadoutForStyle(c.defenseStyle) as any,
             money:         150_000_000,
             morale:        70,
           },
@@ -247,9 +250,51 @@ export async function seedWorld(): Promise<void> {
   console.log(`  ✓ ${totalMatches} matches scheduled`);
 }
 
+function clampRating(value: number): number {
+  return Math.max(35, Math.min(99, value));
+}
+
+function loadoutByWeights<T extends { id: string; category: PlayCategory }>(
+  plays: T[],
+  weights: Array<[PlayCategory, number]>,
+): string[] {
+  const out: string[] = [];
+  for (const [category, count] of weights) {
+    out.push(...plays.filter((play) => play.category === category).slice(0, count).map((play) => play.id));
+  }
+  for (const play of plays) {
+    if (out.length >= 9) break;
+    if (!out.includes(play.id)) out.push(play.id);
+  }
+  return out.slice(0, 9);
+}
+
+function offensiveLoadoutForStyle(offenseStyle: string): string[] {
+  if (offenseStyle === 'PASS_HEAVY') {
+    return loadoutByWeights(OFFENSIVE_PLAYS, [['LONG_PASS', 3], ['MIDDLE_PASS', 3], ['SHORT_PASS', 2], ['RUNNING', 1]]);
+  }
+  if (offenseStyle === 'RUN_HEAVY') {
+    return loadoutByWeights(OFFENSIVE_PLAYS, [['RUNNING', 5], ['MIDDLE_PASS', 2], ['SHORT_PASS', 1], ['LONG_PASS', 1]]);
+  }
+  return loadoutByWeights(OFFENSIVE_PLAYS, [['RUNNING', 3], ['SHORT_PASS', 2], ['MIDDLE_PASS', 2], ['LONG_PASS', 2]]);
+}
+
+function defensiveLoadoutForStyle(defenseStyle: string): string[] {
+  if (defenseStyle === 'AGGRESSIVE') {
+    return loadoutByWeights(DEFENSIVE_PLAYS, [['BLITZ', 4], ['ZONE_BLITZ', 3], ['MAN', 1], ['ZONE', 1]]);
+  }
+  if (defenseStyle === 'PREVENT') {
+    return loadoutByWeights(DEFENSIVE_PLAYS, [['ZONE', 4], ['MAN', 3], ['ZONE_BLITZ', 1], ['BLITZ', 1]]);
+  }
+  return loadoutByWeights(DEFENSIVE_PLAYS, [['ZONE', 3], ['BLITZ', 2], ['ZONE_BLITZ', 2], ['MAN', 2]]);
+}
+
 export function buildCoachStaff(teamId: string, offenseStyle: string, defenseStyle: string, tempo: string) {
   const offensiveSpecialty = offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : randomElement(['QB', 'Skill', 'OL']);
   const defensiveSpecialty = defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? randomElement(['DL', 'LB']) : randomElement(['LB', 'Secondary']);
+  const hcOvr = randomInt(50, 82);
+  const ocOvr = randomInt(45, 78);
+  const dcOvr = randomInt(45, 78);
   return [
     {
       name: randomCoachName(),
@@ -260,6 +305,9 @@ export function buildCoachStaff(teamId: string, offenseStyle: string, defenseSty
       moraleImpact: randomInt(-2, 8),
       preferredTempo: tempo as any,
       reputation: randomInt(45, 78),
+      overall: hcOvr,
+      offenseRating: clampRating(hcOvr + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? randomInt(2, 8) : randomInt(-2, 5))),
+      defenseRating: clampRating(hcOvr + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? randomInt(2, 8) : randomInt(-2, 5))),
       hotSeat: randomInt(12, 35),
       age: randomInt(39, 64),
       teamId,
@@ -273,6 +321,9 @@ export function buildCoachStaff(teamId: string, offenseStyle: string, defenseSty
       moraleImpact: randomInt(-1, 5),
       preferredTempo: tempo as any,
       reputation: randomInt(38, 72),
+      overall: ocOvr,
+      offenseRating: clampRating(ocOvr + randomInt(0, 8)),
+      defenseRating: clampRating(ocOvr + randomInt(-8, 0)),
       hotSeat: randomInt(8, 28),
       age: randomInt(34, 58),
       teamId,
@@ -286,6 +337,9 @@ export function buildCoachStaff(teamId: string, offenseStyle: string, defenseSty
       moraleImpact: randomInt(-1, 5),
       preferredTempo: tempo as any,
       reputation: randomInt(38, 72),
+      overall: dcOvr,
+      offenseRating: clampRating(dcOvr + randomInt(-8, 0)),
+      defenseRating: clampRating(dcOvr + randomInt(0, 8)),
       hotSeat: randomInt(8, 28),
       age: randomInt(34, 60),
       teamId,
@@ -346,6 +400,7 @@ async function clearAndSeed() {
   await prisma.teamSeasonHistory.deleteMany();
   await prisma.leagueSeasonHistory.deleteMany();
   await prisma.seasonHistory.deleteMany();
+  await prisma.teamScheme.deleteMany();
   await prisma.coach.deleteMany();
   await prisma.match.deleteMany();
   await prisma.player.deleteMany();

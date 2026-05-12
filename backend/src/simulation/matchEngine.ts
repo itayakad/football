@@ -1,26 +1,24 @@
-import { computePositionGroups } from './positionGroups';
 import {
-  getStyleMatchup,
-  getTempoBonus,
-  getPositionMatchupBonus,
-  getMoraleWeight,
-  getClockDrain,
-  getDefensePenaltyTax,
-  getFatigueAdjustedScoringMod,
-  rollCoverageBust,
-} from './styleModifiers';
-import {
-  Gameplan,
-  DEFAULT_GAMEPLAN,
-  normalizeGameplan,
-  normalizeOffensivePhilosophy,
-  evaluateConceptPlan,
-  schemeScoreFromPlays,
-  applyTempoOverride,
-} from './gameplan';
-import { generateMatchNarrative } from './matchNarrative';
+  defensivePlayById,
+  defensiveMatchupMod,
+  DEFENSIVE_PLAYS,
+  DefensiveCategory,
+  DefensivePlay,
+  MATCHUP_MULTIPLIER,
+  offensiveMatchupMod,
+  OFFENSIVE_PLAYS,
+  OffensiveCategory,
+  OffensivePlay,
+  Play,
+  PlayerSlot,
+  playById,
+} from './playLibrary';
+import { Gameplan, DEFAULT_GAMEPLAN, normalizeGameplan } from './gameplan';
+
+// ── Public types ──────────────────────────────────────────
 
 export interface PlayerProfile {
+  id?: string;
   name: string;
   position: string;
   overall: number;
@@ -29,295 +27,713 @@ export interface PlayerProfile {
   injuryWeeks?: number;
 }
 
+export interface CoachProfile {
+  role: string;             // 'HEAD_COACH' | 'OC' | 'DC' | etc
+  overall?: number;
+  offenseRating?: number;
+  defenseRating?: number;
+  philosophy?: string;
+  reputation?: number;
+}
+
 export interface TeamMatchProfile {
   id: string;
   name: string;
-  offenseRating: number;
-  defenseRating: number;
-  morale: number;
-  offenseStyle: string;
-  defenseStyle: string;
-  tempo: string;
-  offensivePhilosophy?: string | null;
-  coaches?: Array<{
-    role: string;
-    philosophy: string;
-    reputation: number;
-    aggression?: number;
-    developmentSpecialty?: string;
-    preferredTempo?: string;
-  }>;
   players: PlayerProfile[];
+  coaches?: CoachProfile[];
+  offensivePlays?: string[];
+  defensivePlays?: string[];
+}
+
+export type ResultLabel =
+  | 'GREAT_DEFENSE'
+  | 'DEFENSIVE_STOP'
+  | 'NEUTRAL'
+  | 'OFFENSIVE_GAIN'
+  | 'GREAT_OFFENSE';
+
+export interface PlayEvent {
+  drive: number;
+  quarter: number;
+  offenseSide: 'home' | 'away';
+  offensePlayId: string;
+  defensePlayId: string;
+  offenseCategory: OffensiveCategory;
+  defenseCategory: DefensiveCategory;
+  down: number;
+  distance: number;
+  yardLine: number; // 0-100, offense's perspective (own goal = 0, opp goal = 100)
+  offWinProb: number;
+  offenseWon: boolean;
+  resultLabel: ResultLabel;
+  yards: number;
+  scoringEvent?: 'TD' | 'DEFENSIVE_TD' | 'SAFETY' | 'TURNOVER' | 'FUMBLE' | 'INT' | 'FG_GOOD' | 'FG_MISS' | 'PUNT' | 'TURNOVER_ON_DOWNS';
+}
+
+export interface DriveOutcome {
+  side: 'home' | 'away';
+  drive: number;
+  quarter: number;
+  startYardLine: number;
+  endYardLine: number;
+  result: 'TD' | 'FG' | 'PUNT' | 'TURNOVER' | 'TURNOVER_ON_DOWNS' | 'DEFENSIVE_TD' | 'SAFETY' | 'MISSED_FG';
+  scoringSide?: 'home' | 'away';
+  points: number;
+  plays: PlayEvent[];
 }
 
 export interface ScoringDrive {
-  team:    'home' | 'away';
-  points:  number;  // 7, 3, 6, 8, or 2
-  quarter: number;  // 1..4
+  team: 'home' | 'away';
+  points: number;
+  quarter: number;
 }
 
 export interface MatchSimResult {
-  homeScore:     number;
-  awayScore:     number;
+  homeScore: number;
+  awayScore: number;
   quarterScores: Array<[number, number]>;
   scoringDrives: ScoringDrive[];
-  narrative:     string;
-  keyMatchup:    string;
+  drives: DriveOutcome[];
+  plays: PlayEvent[];
+  narrative: string;
+  keyMatchup: string;
 }
 
-// Box-Muller gaussian for score variance.
-// Produces realistic fat-tailed distribution:
-// most games cluster near expected, occasional blowouts/nail-biters.
-function gaussianRandom(mean: number, std: number): number {
-  const u1 = Math.random();
+// ── Configuration ─────────────────────────────────────────
+
+const HOME_FIELD_PLAY_BONUS = 1.5; // small additive shove to home offense play strengths
+const TOTAL_DRIVES = 22;           // ~11 per team
+const QUARTER_BREAKPOINTS = [5, 11, 16, 22]; // drive index < this => quarter
+
+// HC RNG distribution lookup (offensive OVR -> {optimal, neutral, poor} weights).
+// 50 OVR ≈ 20/50/30, 100 OVR ≈ 80/15/5. Linear with clamps in between.
+function hcPickWeights(ovr: number): { optimal: number; neutral: number; poor: number } {
+  const optimal = clamp(0.20 + (ovr - 50) * 0.012, 0.20, 0.80);
+  const poor    = clamp(0.30 - (ovr - 50) * 0.005, 0.05, 0.30);
+  const neutral = clamp(1 - optimal - poor, 0, 1);
+  return { optimal, neutral, poor };
+}
+
+// ── Roster slot resolution ────────────────────────────────
+
+type SlotMap = Record<PlayerSlot, PlayerProfile | null>;
+
+const POSITION_TO_SLOTS: Array<{ position: string; slots: PlayerSlot[] }> = [
+  { position: 'QB', slots: ['QB'] },
+  { position: 'RB', slots: ['RB'] },
+  { position: 'WR', slots: ['WR1', 'WR2', 'SLOT'] },
+  { position: 'TE', slots: ['TE'] },
+  { position: 'OL', slots: ['LT', 'LG', 'C', 'RG', 'RT'] },
+  { position: 'DE', slots: ['EDGE1', 'EDGE2'] },
+  { position: 'DT', slots: ['DT1', 'DT2'] },
+  { position: 'LB', slots: ['MLB', 'WLB', 'SLB'] },
+  { position: 'CB', slots: ['CB1', 'CB2', 'NCB'] },
+  { position: 'S',  slots: ['FS', 'SS'] },
+];
+
+function buildSlotMap(players: PlayerProfile[]): SlotMap {
+  const map: Partial<SlotMap> = {};
+  for (const group of POSITION_TO_SLOTS) {
+    const sorted = players
+      .filter((p) => p.position === group.position)
+      .map((p) => ({ player: p, score: effectiveOverall(p) }))
+      .sort((a, b) => b.score - a.score);
+    group.slots.forEach((slot, i) => {
+      map[slot] = sorted[i]?.player ?? null;
+    });
+  }
+  return map as SlotMap;
+}
+
+function effectiveOverall(player: PlayerProfile): number {
+  const fatigue = player.fatigue ?? 0;
+  const fatiguePenalty = fatigue >= 80 ? 8 : fatigue >= 60 ? 5 : fatigue >= 40 ? 2 : 0;
+  const injuryPenalty =
+    player.injuryStatus === 'MULTI_WEEK' && (player.injuryWeeks ?? 0) > 0 ? 18 :
+    player.injuryStatus === 'MINOR' ? 8 :
+    player.injuryStatus === 'QUESTIONABLE' ? 4 :
+    0;
+  return Math.max(35, player.overall - fatiguePenalty - injuryPenalty);
+}
+
+function slotRating(slot: PlayerSlot, slots: SlotMap): number {
+  const p = slots[slot];
+  if (!p) return 55; // sensible league-floor fallback if a slot is empty
+  return effectiveOverall(p);
+}
+
+function basePlayStrength(play: Play, slots: SlotMap): number {
+  return play.keySlots.reduce((sum, slot) => sum + slotRating(slot, slots), 0) / 3;
+}
+
+// ── Coach helpers ─────────────────────────────────────────
+
+interface CoachOVRs {
+  hcOverall: number;
+  hcOffense: number;
+  hcDefense: number;
+  ocOverall: number;
+  dcOverall: number;
+}
+
+function extractCoachOVRs(coaches?: CoachProfile[]): CoachOVRs {
+  const hc = coaches?.find((c) => c.role === 'HEAD_COACH');
+  const oc = coaches?.find((c) => c.role === 'OC');
+  const dc = coaches?.find((c) => c.role === 'DC');
+  return {
+    hcOverall: hc?.overall ?? hc?.reputation ?? 60,
+    hcOffense: hc?.offenseRating ?? hc?.overall ?? hc?.reputation ?? 60,
+    hcDefense: hc?.defenseRating ?? hc?.overall ?? hc?.reputation ?? 60,
+    ocOverall: oc?.overall ?? oc?.reputation ?? 60,
+    dcOverall: dc?.overall ?? dc?.reputation ?? 60,
+  };
+}
+
+// ── Per-team match context ────────────────────────────────
+
+interface TeamCtx {
+  name: string;
+  side: 'home' | 'away';
+  isHome: boolean;
+  slots: SlotMap;
+  offense: OffensivePlay[];
+  defense: DefensivePlay[];
+  offenseCategoryCounts: Record<OffensiveCategory, number>;
+  defenseCategoryCounts: Record<DefensiveCategory, number>;
+  coach: CoachOVRs;
+}
+
+function buildContext(team: TeamMatchProfile, gameplan: Gameplan, side: 'home' | 'away'): TeamCtx {
+  const slots = buildSlotMap(team.players);
+  const offense = gameplan.offensivePlays
+    .map((id) => OFFENSIVE_PLAYS.find((p) => p.id === id))
+    .filter((p): p is OffensivePlay => !!p);
+  const defense = gameplan.defensivePlays
+    .map((id) => DEFENSIVE_PLAYS.find((p) => p.id === id))
+    .filter((p): p is DefensivePlay => !!p);
+
+  const offenseCategoryCounts: Record<OffensiveCategory, number> = { RUNNING: 0, SHORT_PASS: 0, MIDDLE_PASS: 0, LONG_PASS: 0 };
+  for (const p of offense) offenseCategoryCounts[p.category]++;
+  const defenseCategoryCounts: Record<DefensiveCategory, number> = { ZONE: 0, BLITZ: 0, ZONE_BLITZ: 0, MAN: 0 };
+  for (const p of defense) defenseCategoryCounts[p.category]++;
+
+  return {
+    name: team.name,
+    side,
+    isHome: side === 'home',
+    slots,
+    offense,
+    defense,
+    offenseCategoryCounts,
+    defenseCategoryCounts,
+    coach: extractCoachOVRs(team.coaches),
+  };
+}
+
+// ── Play selection ────────────────────────────────────────
+
+// Score an offensive play's expected matchup vs the defense's category mix.
+function evaluateOffensiveCandidate(play: OffensivePlay, off: TeamCtx, def: TeamCtx): number {
+  const base = basePlayStrength(play, off.slots);
+  let matchupAvg = 0;
+  let total = 0;
+  for (const cat of Object.keys(def.defenseCategoryCounts) as DefensiveCategory[]) {
+    const w = def.defenseCategoryCounts[cat];
+    if (w === 0) continue;
+    matchupAvg += offensiveMatchupMod(play.category, cat) * w;
+    total += w;
+  }
+  matchupAvg /= total || 1;
+  return base * matchupAvg;
+}
+
+// Score a defensive play's expected matchup vs the offense's category mix.
+function evaluateDefensiveCandidate(play: DefensivePlay, off: TeamCtx, def: TeamCtx): number {
+  const base = basePlayStrength(play, def.slots);
+  let matchupAvg = 0;
+  let total = 0;
+  for (const cat of Object.keys(off.offenseCategoryCounts) as OffensiveCategory[]) {
+    const w = off.offenseCategoryCounts[cat];
+    if (w === 0) continue;
+    matchupAvg += defensiveMatchupMod(cat, play.category) * w;
+    total += w;
+  }
+  matchupAvg /= total || 1;
+  return base * matchupAvg;
+}
+
+// Pick one of {best, mid, worst} from a sorted candidate list based on HC OVR.
+function hcWeightedPick<T>(sorted: T[], hcOvr: number): T {
+  const { optimal, neutral } = hcPickWeights(hcOvr);
+  const r = Math.random();
+  if (r < optimal) return sorted[0] ?? sorted[sorted.length - 1];
+  if (r < optimal + neutral) return sorted[1] ?? sorted[0];
+  return sorted[2] ?? sorted[sorted.length - 1];
+}
+
+// Sample 3 unique candidates from a 9-play loadout, weighted by category frequency.
+// This is the layer where a 6-blitz defense skews toward blitzes — not raw strength.
+function sampleCandidates<T extends Play>(plays: T[]): T[] {
+  if (plays.length <= 3) return plays.slice();
+  const pool = plays.slice();
+  const out: T[] = [];
+  for (let i = 0; i < 3 && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    out.push(pool[idx]);
+    pool.splice(idx, 1);
+  }
+  return out;
+}
+
+function pickOffensivePlay(off: TeamCtx, def: TeamCtx): OffensivePlay {
+  const candidates = sampleCandidates(off.offense);
+  const scored = candidates
+    .map((play) => ({ play, score: evaluateOffensiveCandidate(play, off, def) }))
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.play);
+  return hcWeightedPick(scored, off.coach.hcOffense);
+}
+
+function pickDefensivePlay(off: TeamCtx, def: TeamCtx): DefensivePlay {
+  const candidates = sampleCandidates(def.defense);
+  const scored = candidates
+    .map((play) => ({ play, score: evaluateDefensiveCandidate(play, off, def) }))
+    .sort((a, b) => b.score - a.score)
+    .map((entry) => entry.play);
+  return hcWeightedPick(scored, def.coach.hcDefense);
+}
+
+// ── Play resolution ───────────────────────────────────────
+
+function gaussian(mean: number, std: number): number {
+  const u1 = Math.max(Number.EPSILON, Math.random());
   const u2 = Math.random();
-  const z  = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+  const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   return mean + std * z;
 }
+
+interface PlayResolution {
+  offWinProb: number;
+  offenseWon: boolean;
+  yards: number;
+  resultLabel: ResultLabel;
+  scoringEvent?: PlayEvent['scoringEvent'];
+}
+
+function resolvePlay(
+  offPlay: OffensivePlay,
+  defPlay: DefensivePlay,
+  off: TeamCtx,
+  def: TeamCtx,
+): PlayResolution {
+  const offBaseRaw = basePlayStrength(offPlay, off.slots);
+  const defBaseRaw = basePlayStrength(defPlay, def.slots);
+  const offBase = off.isHome ? offBaseRaw + HOME_FIELD_PLAY_BONUS : offBaseRaw;
+  const defBase = def.isHome ? defBaseRaw + HOME_FIELD_PLAY_BONUS : defBaseRaw;
+
+  const offMatchup = offensiveMatchupMod(offPlay.category, defPlay.category);
+  const defMatchup = defensiveMatchupMod(offPlay.category, defPlay.category);
+
+  const ocMod = 1 + (off.coach.ocOverall - 50) / 100;
+  const dcMod = 1 + (def.coach.dcOverall - 50) / 100;
+
+  const offFinal = offBase * offMatchup * ocMod;
+  const defFinal = defBase * defMatchup * dcMod;
+
+  const offWinProb = offFinal / (offFinal + defFinal);
+  const offenseWon = Math.random() < offWinProb;
+
+  // Severity: bell curve shifted toward the winner. Margin amplifies the shift.
+  const margin = Math.abs(offWinProb - 0.5) * 2; // 0..1
+  const shiftMagnitude = 0.8 + margin * 1.2;     // 0.8..2.0
+  const baseShift = offenseWon ? +shiftMagnitude : -shiftMagnitude;
+  const severity = gaussian(baseShift, 0.9);
+
+  return mapSeverityToOutcome(severity, offPlay, defPlay, offWinProb, offenseWon);
+}
+
+function mapSeverityToOutcome(
+  severity: number,
+  offPlay: OffensivePlay,
+  defPlay: DefensivePlay,
+  offWinProb: number,
+  offenseWon: boolean,
+): PlayResolution {
+  let yards: number;
+  let label: ResultLabel;
+  let scoringEvent: PlayEvent['scoringEvent'] | undefined;
+
+  if (severity > 2.0) {
+    label = 'GREAT_OFFENSE';
+    yards = 20 + Math.random() * 45;       // explosive 20-65 yard chunks
+  } else if (severity > 0.5) {
+    label = 'OFFENSIVE_GAIN';
+    yards = 4 + Math.random() * 11;         // 4-15
+  } else if (severity > -0.5) {
+    label = 'NEUTRAL';
+    yards = -1 + Math.random() * 6;         // -1..5
+  } else if (severity > -2.0) {
+    label = 'DEFENSIVE_STOP';
+    yards = -3 + Math.random() * 4;         // -3..1
+  } else {
+    label = 'GREAT_DEFENSE';
+    yards = -9 + Math.random() * 5;         // -9..-4 (TFLs, sacks)
+    // Turnover roll when the defense thoroughly wins. Pass plays bias toward INTs.
+    const isPass = offPlay.category !== 'RUNNING';
+    const turnoverP = 0.18 + Math.min(0.22, (Math.abs(severity) - 2) * 0.18);
+    if (Math.random() < turnoverP) {
+      // Pick six / scoop-and-score: small chance when defense dominates.
+      const defTdP = isPass ? 0.12 : 0.05;
+      if (Math.random() < defTdP) scoringEvent = 'DEFENSIVE_TD';
+      else scoringEvent = isPass ? 'INT' : 'FUMBLE';
+    }
+  }
+
+  // Coverage of pass-play floor: incompletions land at 0 yards rather than negative.
+  if (offPlay.category !== 'RUNNING' && yards < 0 && label === 'DEFENSIVE_STOP') {
+    yards = Math.random() < 0.6 ? 0 : yards;
+  }
+
+  return {
+    offWinProb,
+    offenseWon,
+    yards: Math.round(yards),
+    resultLabel: label,
+    scoringEvent,
+  };
+}
+
+// ── Drive simulation ──────────────────────────────────────
+
+function simulateDrive(
+  off: TeamCtx,
+  def: TeamCtx,
+  driveIdx: number,
+  startYardLine: number,
+  quarter: number,
+): DriveOutcome {
+  let yardLine = startYardLine;
+  let down = 1;
+  let distance = 10;
+  const plays: PlayEvent[] = [];
+  const startLine = yardLine;
+
+  while (true) {
+    // 4th down decision: FG if within range, otherwise punt (or rare go-for-it).
+    if (down === 4) {
+      const yardsToGoal = 100 - yardLine;
+      const fgKickDistance = yardsToGoal + 17; // snap+holder distance
+      if (yardsToGoal <= 4 && Math.random() < 0.35) {
+        // Goal-line gamble — fall through to play
+      } else if (fgKickDistance <= 60) {
+        const fgGood = rollFGSuccess(fgKickDistance);
+        const event: PlayEvent = blankPlayEvent({
+          drive: driveIdx, quarter, offenseSide: off.side,
+          offensePlayId: '__fg__', defensePlayId: '__fg_block__',
+          offenseCategory: 'RUNNING', defenseCategory: 'ZONE',
+          down, distance, yardLine,
+          offWinProb: 0.5, offenseWon: fgGood, resultLabel: fgGood ? 'OFFENSIVE_GAIN' : 'DEFENSIVE_STOP',
+          yards: 0, scoringEvent: fgGood ? 'FG_GOOD' : 'FG_MISS',
+        });
+        plays.push(event);
+        if (fgGood) {
+          return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: yardLine, result: 'FG', scoringSide: off.side, points: 3, plays };
+        }
+        return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: yardLine, result: 'MISSED_FG', points: 0, plays };
+      } else if (yardsToGoal > 50 || distance > 5) {
+        // Punt
+        const event: PlayEvent = blankPlayEvent({
+          drive: driveIdx, quarter, offenseSide: off.side,
+          offensePlayId: '__punt__', defensePlayId: '__punt_return__',
+          offenseCategory: 'RUNNING', defenseCategory: 'ZONE',
+          down, distance, yardLine,
+          offWinProb: 0.5, offenseWon: true, resultLabel: 'NEUTRAL',
+          yards: 0, scoringEvent: 'PUNT',
+        });
+        plays.push(event);
+        return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: yardLine, result: 'PUNT', points: 0, plays };
+      }
+      // Otherwise: go for it — fall through to play resolution.
+    }
+
+    // Run a play.
+    const offPlay = pickOffensivePlay(off, def);
+    const defPlay = pickDefensivePlay(off, def);
+    const res = resolvePlay(offPlay, defPlay, off, def);
+
+    let scoringEvent = res.scoringEvent;
+    let appliedYards = res.yards;
+
+    // Cap upside to remaining yardage on long gains.
+    if (yardLine + appliedYards > 100) appliedYards = 100 - yardLine;
+
+    plays.push({
+      drive: driveIdx, quarter,
+      offenseSide: off.side,
+      offensePlayId: offPlay.id, defensePlayId: defPlay.id,
+      offenseCategory: offPlay.category, defenseCategory: defPlay.category,
+      down, distance, yardLine,
+      offWinProb: res.offWinProb, offenseWon: res.offenseWon,
+      resultLabel: res.resultLabel,
+      yards: appliedYards,
+      scoringEvent,
+    });
+
+    if (scoringEvent === 'DEFENSIVE_TD') {
+      return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: yardLine, result: 'DEFENSIVE_TD', scoringSide: def.side, points: 7, plays };
+    }
+    if (scoringEvent === 'INT' || scoringEvent === 'FUMBLE') {
+      return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: yardLine, result: 'TURNOVER', points: 0, plays };
+    }
+
+    yardLine += appliedYards;
+
+    // Safety: pinned in own end zone for a loss.
+    if (yardLine < 0) {
+      // Flip the last play's scoring event for clarity
+      plays[plays.length - 1].scoringEvent = 'SAFETY';
+      return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: 0, result: 'SAFETY', scoringSide: def.side, points: 2, plays };
+    }
+
+    // Touchdown.
+    if (yardLine >= 100) {
+      plays[plays.length - 1].scoringEvent = 'TD';
+      return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: 100, result: 'TD', scoringSide: off.side, points: 7, plays };
+    }
+
+    distance -= appliedYards;
+    if (distance <= 0) {
+      down = 1;
+      distance = 10;
+    } else {
+      down++;
+      if (down > 4) {
+        // Failed go-for-it: turnover on downs.
+        plays[plays.length - 1].scoringEvent = 'TURNOVER_ON_DOWNS';
+        return { side: off.side, drive: driveIdx, quarter, startYardLine: startLine, endYardLine: yardLine, result: 'TURNOVER_ON_DOWNS', points: 0, plays };
+      }
+    }
+  }
+}
+
+function rollFGSuccess(distance: number): boolean {
+  // Realistic-ish accuracy curve: ~95% from 20, ~85% from 40, ~60% from 50, ~30% from 58+
+  const p =
+    distance <= 25 ? 0.96 :
+    distance <= 35 ? 0.90 :
+    distance <= 42 ? 0.82 :
+    distance <= 48 ? 0.70 :
+    distance <= 53 ? 0.55 :
+    distance <= 58 ? 0.35 :
+                      0.18;
+  return Math.random() < p;
+}
+
+function blankPlayEvent(partial: Partial<PlayEvent>): PlayEvent {
+  return {
+    drive: 0, quarter: 1, offenseSide: 'home',
+    offensePlayId: '', defensePlayId: '',
+    offenseCategory: 'RUNNING', defenseCategory: 'ZONE',
+    down: 1, distance: 10, yardLine: 25,
+    offWinProb: 0.5, offenseWon: false, resultLabel: 'NEUTRAL',
+    yards: 0,
+    ...partial,
+  };
+}
+
+// ── Match simulation ──────────────────────────────────────
 
 export function simulateMatch(
   home: TeamMatchProfile,
   away: TeamMatchProfile,
-  week: number = 1,
+  _week: number = 1,
   homeGameplan: Gameplan = DEFAULT_GAMEPLAN,
   awayGameplan: Gameplan = DEFAULT_GAMEPLAN,
 ): MatchSimResult {
-  homeGameplan = normalizeGameplan(homeGameplan, home);
-  awayGameplan = normalizeGameplan(awayGameplan, away);
-  // ── Layer 1: Unit-level matchup advantages ───────────────
-  // Position groups create the "film room" advantage that tactics leverage.
-  const homeGroups = computePositionGroups(home.players);
-  const awayGroups = computePositionGroups(away.players);
+  const homeGP = normalizeGameplan(homeGameplan);
+  const awayGP = normalizeGameplan(awayGameplan);
 
-  // ── Layer 2: Base expected score ─────────────────────────
-  // Team rating differential + style-weighted morale + home field.
-  // PASS_HEAVY teams swing harder with morale (QB rhythm dependent).
-  // RUN_HEAVY teams grind regardless.
-  const HOME_FIELD_BONUS = 4;     // 2026-05-07: bumped from 3 — was washing out below 50% home wins
-  const BASE_SCORE       = 19.5;  // 2026-05-07: nudged from 19 toward 20, slight scoring rebound
-  const VARIANCE_STD     = 6;
+  const homeCtx = buildContext(home, homeGP, 'home');
+  const awayCtx = buildContext(away, awayGP, 'away');
 
-  const homeMoraleWeight = getMoraleWeight(home.offenseStyle);
-  const awayMoraleWeight = getMoraleWeight(away.offenseStyle);
+  let homeScore = 0;
+  let awayScore = 0;
+  const quarterScores: Array<[number, number]> = [[0, 0], [0, 0], [0, 0], [0, 0]];
+  const drives: DriveOutcome[] = [];
+  const allPlays: PlayEvent[] = [];
 
-  const homeNet = home.offenseRating - away.defenseRating + (home.morale - 50) * homeMoraleWeight + HOME_FIELD_BONUS;
-  const awayNet = away.offenseRating - home.defenseRating + (away.morale - 50) * awayMoraleWeight;
+  // Coin flip decides who receives. Standard model: receiving team starts on offense.
+  let possession: 'home' | 'away' = Math.random() < 0.5 ? 'home' : 'away';
+  let nextStart = 25;
 
-  let homeExpected = BASE_SCORE + homeNet * 0.2;
-  let awayExpected = BASE_SCORE + awayNet * 0.2;
+  for (let i = 0; i < TOTAL_DRIVES; i++) {
+    const quarter = quarterFromDrive(i);
+    const off = possession === 'home' ? homeCtx : awayCtx;
+    const def = possession === 'home' ? awayCtx : homeCtx;
 
-  // ── Layer 3: Tactical identity ───────────────────────────
-  // Scheme matchup shifts scoring expectations and variance.
-  // e.g. PASS_HEAVY vs AGGRESSIVE = high variance on both sides.
-  // e.g. RUN_HEAVY vs PREVENT     = run team gets free yards, tight distribution.
-  //
-  // AGG defenses' scoringMod decays through the season (late-season fatigue):
-  // full effect weeks 1-7, up to 50% nerf by week 14.
-  const homeStyleEffect = getStyleMatchup(home.offenseStyle, away.defenseStyle);
-  const awayStyleEffect = getStyleMatchup(away.offenseStyle, home.defenseStyle);
+    const drive = simulateDrive(off, def, i, nextStart, quarter);
+    drives.push(drive);
+    allPlays.push(...drive.plays);
 
-  homeExpected += getFatigueAdjustedScoringMod(homeStyleEffect.scoringMod, away.defenseStyle, week);
-  awayExpected += getFatigueAdjustedScoringMod(awayStyleEffect.scoringMod, home.defenseStyle, week);
+    // Apply points to the right side.
+    if (drive.points > 0 && drive.scoringSide) {
+      if (drive.scoringSide === 'home') homeScore += drive.points;
+      else                              awayScore += drive.points;
+      quarterScores[quarter - 1][drive.scoringSide === 'home' ? 0 : 1] += drive.points;
+    }
 
-  // Penalty tax — AGG defenses give the opposing offense free yards every game
-  // via PI / roughing / illegal contact. Always-on structural cost of aggression.
-  homeExpected += getDefensePenaltyTax(away.defenseStyle);
-  awayExpected += getDefensePenaltyTax(home.defenseStyle);
-
-  // ── Layer 4: Clock drain ─────────────────────────────────
-  // Opponent's offensive style drains my possessions.
-  // RUN_HEAVY opponent → fewer possessions for me → lower scoring.
-  // PASS_HEAVY opponent → quick scores → ball back to me faster.
-  homeExpected -= getClockDrain(away.offenseStyle);
-  awayExpected -= getClockDrain(home.offenseStyle);
-
-  // ── Layer 5: Tempo (gameplan-overridable) ────────────────
-  // Tempo override lets a team play faster or slower than their identity
-  // for this specific game (e.g. an up-tempo team slowing down to protect a lead).
-  const homeEffectiveTempo = applyTempoOverride(home.tempo, homeGameplan.tempoOverride);
-  const awayEffectiveTempo = applyTempoOverride(away.tempo, awayGameplan.tempoOverride);
-  homeExpected += getTempoBonus(homeEffectiveTempo, awayEffectiveTempo);
-  awayExpected += getTempoBonus(awayEffectiveTempo, homeEffectiveTempo);
-
-  // ── Layer 6: Position group matchups ─────────────────────
-  // OL vs front seven, skill vs secondary, QB quality.
-  // These create the "elite pass rush destroys a weak OL" moments.
-  homeExpected += getPositionMatchupBonus(homeGroups, awayGroups, home.offenseStyle);
-  awayExpected += getPositionMatchupBonus(awayGroups, homeGroups, away.offenseStyle);
-
-  // ── Layer 7: Concept/counter gameplan adjustments ───────
-  // Each offense brings three concepts. Each defense brings three counters.
-  // The weighted matrix turns that abstract weekly plan into points and risk.
-  const homeConceptEffect = evaluateConceptPlan(
-    home,
-    away,
-    homeGroups,
-    awayGroups,
-    homeGameplan.offensiveConcepts,
-    awayGameplan.defensiveCounters,
-  );
-  const awayConceptEffect = evaluateConceptPlan(
-    away,
-    home,
-    awayGroups,
-    homeGroups,
-    awayGameplan.offensiveConcepts,
-    homeGameplan.defensiveCounters,
-  );
-
-  homeExpected += homeConceptEffect.scoringMod;
-  awayExpected += awayConceptEffect.scoringMod;
-  homeExpected += schemeScoreFromPlays(homeGameplan.offensivePlays ?? [], 'offense');
-  awayExpected += schemeScoreFromPlays(awayGameplan.offensivePlays ?? [], 'offense');
-
-  // Compose variance multipliers across all sources for each side
-  const homeVarianceFactor = homeStyleEffect.varianceMod * homeConceptEffect.varianceMod;
-  const awayVarianceFactor = awayStyleEffect.varianceMod * awayConceptEffect.varianceMod;
-
-  // ── Score generation ─────────────────────────────────────
-  // Variance scales with style + offensive focus + opposing defensive focus.
-  let homeScore = Math.max(0, Math.round(homeExpected + gaussianRandom(0, VARIANCE_STD * homeVarianceFactor)));
-  let awayScore = Math.max(0, Math.round(awayExpected + gaussianRandom(0, VARIANCE_STD * awayVarianceFactor)));
-
-  // ── Coverage bust events ─────────────────────────────────
-  // Rare per-game roll: AGG defenses give up an unscripted explosive play.
-  // Hurts the AGG team only. Run before OT so a bust can decide a regulation tie.
-  const homeDefBust = rollCoverageBust(home.defenseStyle, away.offenseStyle);
-  const awayDefBust = rollCoverageBust(away.defenseStyle, home.offenseStyle);
-  if (homeDefBust.triggered) awayScore += homeDefBust.points;
-  if (awayDefBust.triggered) homeScore += awayDefBust.points;
-
-  // ── OT tiebreaker ─────────────────────────────────────────
-  // When regulation ends tied, "play OT": one drive each, weighted coin-flip.
-  // The team with higher offense + morale wins more often, but upsets happen.
-  // Tied games resolve to a 3-point win (field goal in OT) for the winner.
-  if (homeScore === awayScore) {
-    const homeOTPower = home.offenseRating + home.morale * 0.3 + 5; // home gets ball first / crowd
-    const awayOTPower = away.offenseRating + away.morale * 0.3;
-    const homeWinProb = homeOTPower / (homeOTPower + awayOTPower);
-    if (Math.random() < homeWinProb) homeScore += 3;
-    else                              awayScore += 3;
+    // Next possession + starting field position.
+    if (drive.result === 'TD' || drive.result === 'FG' || drive.result === 'DEFENSIVE_TD') {
+      possession = otherSide(possession);
+      nextStart = 25;
+    } else if (drive.result === 'SAFETY') {
+      // Team that gave up the safety free-kicks; opponent gets ball at ~40.
+      possession = otherSide(possession);
+      nextStart = 40;
+    } else if (drive.result === 'PUNT') {
+      possession = otherSide(possession);
+      nextStart = clamp(100 - drive.endYardLine - 30 - Math.floor(Math.random() * 12), 5, 80);
+    } else if (drive.result === 'MISSED_FG') {
+      possession = otherSide(possession);
+      nextStart = Math.max(20, 100 - drive.endYardLine);
+    } else if (drive.result === 'TURNOVER' || drive.result === 'TURNOVER_ON_DOWNS') {
+      possession = otherSide(possession);
+      nextStart = clamp(100 - drive.endYardLine, 5, 95);
+    }
   }
 
-  // ── Quantize to football-valid totals ─────────────────────
-  // Snap weird scores (1, 4) to nearest valid composition of {7,3,6,8,2}.
-  homeScore = quantizeFootballScore(homeScore);
-  awayScore = quantizeFootballScore(awayScore);
+  // Overtime: if tied at the end of regulation, run a single sudden-death drive each.
   if (homeScore === awayScore) {
-    if (Math.random() < 0.5) homeScore += 3;
-    else                     awayScore += 3;
+    const otQuarter = 4;
+    const order: Array<'home' | 'away'> = Math.random() < 0.55 ? ['home', 'away'] : ['away', 'home'];
+    for (const side of order) {
+      if (homeScore !== awayScore) break;
+      const off = side === 'home' ? homeCtx : awayCtx;
+      const def = side === 'home' ? awayCtx : homeCtx;
+      const drive = simulateDrive(off, def, TOTAL_DRIVES + order.indexOf(side), 25, otQuarter);
+      drives.push(drive);
+      allPlays.push(...drive.plays);
+      if (drive.scoringSide && drive.points > 0) {
+        if (drive.scoringSide === 'home') homeScore += drive.points;
+        else                              awayScore += drive.points;
+        quarterScores[otQuarter - 1][drive.scoringSide === 'home' ? 0 : 1] += drive.points;
+      }
+    }
+    // Hard tiebreaker if both OT possessions stalled.
+    if (homeScore === awayScore) {
+      if (Math.random() < 0.55) homeScore += 3;
+      else                      awayScore += 3;
+      quarterScores[otQuarter - 1][homeScore > awayScore ? 0 : 1] += 3;
+    }
   }
 
-  // ── Plan scoring drives + quarter breakdown ───────────────
-  const { drives: scoringDrives, quarterScores } = planScoringDrives(homeScore, awayScore);
+  const scoringDrives: ScoringDrive[] = drives
+    .filter((d) => d.points > 0 && d.scoringSide)
+    .map((d) => ({ team: d.scoringSide!, points: d.points, quarter: d.quarter }));
 
-  // ── Narrative ─────────────────────────────────────────────
-  const { summary: narrative, keyMatchup } = generateMatchNarrative({
-    homeTeamName: home.name,
-    awayTeamName: away.name,
+  const { narrative, keyMatchup } = buildNarrative(home, away, homeScore, awayScore, drives, allPlays);
+
+  return {
     homeScore,
     awayScore,
-    homeOffStyle: home.offenseStyle,
-    awayOffStyle: away.offenseStyle,
-    homeDefStyle: home.defenseStyle,
-    awayDefStyle: away.defenseStyle,
-    homeOffPhilosophy: normalizeOffensivePhilosophy(home.offensivePhilosophy, home.offenseStyle),
-    awayOffPhilosophy: normalizeOffensivePhilosophy(away.offensivePhilosophy, away.offenseStyle),
-    homePlayers:  home.players,
-    awayPlayers:  away.players,
-    homeConcepts: homeGameplan.offensiveConcepts,
-    awayConcepts: awayGameplan.offensiveConcepts,
-    homeCounters: homeGameplan.defensiveCounters,
-    awayCounters: awayGameplan.defensiveCounters,
-    homeTacticalNote: homeConceptEffect.topInteraction,
-    awayTacticalNote: awayConceptEffect.topInteraction,
-  });
-
-  return { homeScore, awayScore, quarterScores, scoringDrives, narrative, keyMatchup };
+    quarterScores,
+    scoringDrives,
+    drives,
+    plays: allPlays,
+    narrative,
+    keyMatchup,
+  };
 }
 
-// ─── Football-realistic score plumbing ───────────────────────
-//
-// Total scores must be reachable by a sum of {7, 3, 6, 8, 2}. The set of
-// invalid totals is just {1, 4} — quantize those.
-function quantizeFootballScore(n: number): number {
-  if (n <= 0) return 0;
-  if (n === 1) return 0;
-  if (n === 4) return 3;
-  return n;
-}
-
-// Decompose a team total into a list of scoring plays. Most plays are TDs (7)
-// and FGs (3). A given team has a small chance of one missed-XP TD (6) or one
-// safety (2). 2-point conversion (8) is also rare. Caller shouldn't pass 1 or 4.
-function decomposeFootballScore(total: number): number[] {
-  if (total <= 0) return [];
-  let r = total;
-  const out: number[] = [];
-
-  // Per-team rare event probabilities.
-  const wantSafety   = r >= 2 && Math.random() < 0.025;  // ~1 in 20 games (combined ~5%)
-  const wantMissedXP = Math.random() < 0.05;              // ~1 in 10 games (combined ~10%)
-  const want2Pt      = Math.random() < 0.06;
-
-  if (wantSafety) { out.push(2); r -= 2; }
-
-  let usedMissedXP = false;
-  let used2Pt = false;
-  while (r >= 6) {
-    if (wantMissedXP && !usedMissedXP) {
-      out.push(6); r -= 6; usedMissedXP = true; continue;
-    }
-    if (want2Pt && !used2Pt && r >= 8) {
-      out.push(8); r -= 8; used2Pt = true; continue;
-    }
-    if (r >= 7) { out.push(7); r -= 7; }
-    else        { out.push(6); r -= 6; usedMissedXP = true; }
-  }
-
-  while (r >= 3) { out.push(3); r -= 3; }
-
-  if (r === 2) out.push(2);  // didn't roll the safety bit but total had a 2 in it
-
-  return out;
-}
-
-const QUARTER_WEIGHTS = [0.18, 0.30, 0.20, 0.32];  // bias to Q2 / Q4
-
-function pickQuarter(): number {
-  let r = Math.random();
-  for (let i = 0; i < QUARTER_WEIGHTS.length; i++) {
-    r -= QUARTER_WEIGHTS[i];
-    if (r <= 0) return i + 1;
+function quarterFromDrive(driveIdx: number): number {
+  for (let q = 0; q < QUARTER_BREAKPOINTS.length; q++) {
+    if (driveIdx < QUARTER_BREAKPOINTS[q]) return q + 1;
   }
   return 4;
 }
 
-function planScoringDrives(homeScore: number, awayScore: number): {
-  drives: ScoringDrive[];
-  quarterScores: Array<[number, number]>;
-} {
-  const homePlays = decomposeFootballScore(homeScore);
-  const awayPlays = decomposeFootballScore(awayScore);
-
-  const drives: ScoringDrive[] = [];
-  for (const points of homePlays) drives.push({ team: 'home', points, quarter: pickQuarter() });
-  for (const points of awayPlays) drives.push({ team: 'away', points, quarter: pickQuarter() });
-  drives.sort((a, b) => a.quarter - b.quarter);
-
-  const homeByQ = [0, 0, 0, 0];
-  const awayByQ = [0, 0, 0, 0];
-  for (const d of drives) {
-    if (d.team === 'home') homeByQ[d.quarter - 1] += d.points;
-    else                   awayByQ[d.quarter - 1] += d.points;
-  }
-
-  const quarterScores: Array<[number, number]> = [
-    [homeByQ[0], awayByQ[0]],
-    [homeByQ[1], awayByQ[1]],
-    [homeByQ[2], awayByQ[2]],
-    [homeByQ[3], awayByQ[3]],
-  ];
-
-  return { drives, quarterScores };
+function otherSide(s: 'home' | 'away'): 'home' | 'away' {
+  return s === 'home' ? 'away' : 'home';
 }
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+// ── Narrative ─────────────────────────────────────────────
+
+function buildNarrative(
+  home: TeamMatchProfile,
+  away: TeamMatchProfile,
+  homeScore: number,
+  awayScore: number,
+  drives: DriveOutcome[],
+  plays: PlayEvent[],
+): { narrative: string; keyMatchup: string } {
+  const winnerHome = homeScore >= awayScore;
+  const winnerName = winnerHome ? home.name : away.name;
+  const loserName  = winnerHome ? away.name : home.name;
+  const winnerScore = winnerHome ? homeScore : awayScore;
+  const loserScore  = winnerHome ? awayScore : homeScore;
+  const diff = winnerScore - loserScore;
+
+  const tone = diff >= 17 ? 'blowout' : diff >= 8 ? 'comfortable' : diff <= 3 ? 'nail-biter' : 'tight';
+
+  // Most-used categories tell the identity story.
+  const winnerOffCat = topOffCategory(plays.filter((p) => p.offenseSide === (winnerHome ? 'home' : 'away')));
+  const winnerDefCat = topDefCategoryAgainst(plays.filter((p) => p.offenseSide !== (winnerHome ? 'home' : 'away')));
+  const offNote = offCategoryDescription(winnerOffCat);
+  const defNote = defCategoryDescription(winnerDefCat);
+
+  const summary =
+    tone === 'blowout'
+      ? `${winnerName} dominated ${loserName} ${winnerScore}-${loserScore}. ${offNote} ${defNote}`
+      : tone === 'comfortable'
+      ? `${winnerName} controlled ${loserName} ${winnerScore}-${loserScore}. ${offNote} ${defNote}`
+      : tone === 'nail-biter'
+      ? `${winnerName} edged ${loserName} ${winnerScore}-${loserScore} in a tight one. ${offNote} ${defNote}`
+      : `${winnerName} beat ${loserName} ${winnerScore}-${loserScore}. ${offNote} ${defNote}`;
+
+  const keyMatchup = `${winnerOffCat ? labelFor(winnerOffCat) : 'Mixed offense'} vs ${winnerDefCat ? labelFor(winnerDefCat) : 'mixed defense'}`;
+
+  return { narrative: summary, keyMatchup };
+}
+
+function topOffCategory(plays: PlayEvent[]): OffensiveCategory | null {
+  const counts: Record<string, number> = {};
+  for (const p of plays) counts[p.offenseCategory] = (counts[p.offenseCategory] ?? 0) + 1;
+  return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null) as OffensiveCategory | null;
+}
+
+function topDefCategoryAgainst(plays: PlayEvent[]): DefensiveCategory | null {
+  const counts: Record<string, number> = {};
+  for (const p of plays) counts[p.defenseCategory] = (counts[p.defenseCategory] ?? 0) + 1;
+  return (Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null) as DefensiveCategory | null;
+}
+
+function offCategoryDescription(cat: OffensiveCategory | null): string {
+  switch (cat) {
+    case 'RUNNING':     return 'They leaned on the ground game.';
+    case 'SHORT_PASS':  return 'They picked apart the underneath.';
+    case 'MIDDLE_PASS': return 'They worked the intermediate windows.';
+    case 'LONG_PASS':   return 'They took shots downfield.';
+    default:            return '';
+  }
+}
+
+function defCategoryDescription(cat: DefensiveCategory | null): string {
+  switch (cat) {
+    case 'ZONE':       return 'The defense played disciplined zone.';
+    case 'BLITZ':      return 'The defense brought heat all afternoon.';
+    case 'ZONE_BLITZ': return 'The defense disguised pressure out of zone shells.';
+    case 'MAN':        return 'The defense locked up in man coverage.';
+    default:           return '';
+  }
+}
+
+function labelFor(value: string): string {
+  return value.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+// Helper: re-export for callers that need to inspect a play by id (e.g. feed gen)
+export { playById };

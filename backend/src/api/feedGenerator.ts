@@ -1,4 +1,5 @@
-import type { MatchSimResult } from '../simulation/matchEngine';
+import type { MatchSimResult, PlayEvent, DriveOutcome } from '../simulation/matchEngine';
+import { CATEGORY_LABEL, playById } from '../simulation/playLibrary';
 
 export interface FeedEvent {
   quarter:    number;
@@ -18,333 +19,195 @@ export interface TopPlayer {
 }
 
 export interface TeamSnapshot {
-  name:         string;
-  offenseStyle: string;
-  defenseStyle: string;
-  topPlayers:   TopPlayer[];  // top N by overall (caller decides N; ~5-10 is fine)
+  name:       string;
+  side:       'home' | 'away';
+  topPlayers: TopPlayer[];
 }
 
-// ─── Public API ──────────────────────────────────────────────
+// Build a play-by-play feed directly from the simulation log. Each PlayEvent
+// becomes one or more lines; drive endings produce SCORE/PUNT/TURNOVER events.
 export function generateMatchFeed(
   home: TeamSnapshot,
   away: TeamSnapshot,
   result: MatchSimResult,
 ): FeedEvent[] {
   const events: FeedEvent[] = [];
-  let homeRun = 0, awayRun = 0;
-  let possession: 'home' | 'away' = 'away';
+  let homeRun = 0;
+  let awayRun = 0;
+  let halftimeFired = false;
 
+  const firstOffense = result.drives[0]?.side ?? 'away';
+  const firstReceiver = firstOffense;
+  const firstKicker = otherSide(firstReceiver);
   events.push({
-    quarter:   1,
-    type:      'KICKOFF',
-    text:      `${home.name} kicks off. ${away.name} returns it out to start the game.`,
+    quarter: 1,
+    type: 'KICKOFF',
+    text: `${snap(home, away, firstKicker).name} kicks off. ${snap(home, away, firstReceiver).name} returns it to start the game.`,
     homeScore: 0,
     awayScore: 0,
-    possessionTeam: 'away',
+    possessionTeam: firstReceiver,
   });
 
-  for (let q = 1; q <= 4; q++) {
-    if (q === 3) {
-      possession = 'home';
+  for (const drive of result.drives) {
+    const off = snap(home, away, drive.side);
+    const def = snap(home, away, otherSide(drive.side));
+
+    for (const play of drive.plays) {
+      // Special-action events (FG, punt) get their own lines below — skip generic play text for them.
+      if (play.scoringEvent === 'FG_GOOD' || play.scoringEvent === 'FG_MISS' || play.scoringEvent === 'PUNT') continue;
+      const text = playText(off, def, play);
       events.push({
-        quarter: q,
-        type: 'KICKOFF',
-        text: `${away.name} kicks off to open the second half. ${home.name} starts with possession.`,
+        quarter: play.quarter,
+        type: 'PLAY',
+        text,
         homeScore: homeRun,
         awayScore: awayRun,
-        possessionTeam: 'home',
+        possessionTeam: drive.side,
       });
     }
 
-    const scoring = result.scoringDrives.filter((d) => d.quarter === q);
-    const minDrives = Math.max(3, scoring.length + 1 + Math.floor(Math.random() * 2));
-    let driveCount = 0;
-    let scoringIndex = 0;
-
-    while (scoringIndex < scoring.length || driveCount < minDrives) {
-      const nextScore = scoring[scoringIndex];
-      const shouldScore = nextScore != null && (
-        nextScore.points === 2 ? nextScore.team === otherSide(possession) : nextScore.team === possession
-      );
-      const drive = shouldScore ? nextScore : null;
-      const offenseSide = possession;
-      const defenseSide = otherSide(offenseSide);
-      const offense = offenseSide === 'home' ? home : away;
-      const defense = defenseSide === 'home' ? home : away;
-
-      const setupCount = shouldScore
-        ? drive!.points === 2 ? 1 : 2 + Math.floor(Math.random() * 3)
-        : Math.random() < 0.35 ? 2 : 1;
-
-      for (let s = 0; s < setupCount; s++) {
-        events.push({
-          quarter:   q,
-          type:      'PLAY',
-          text:      setupPlayText(offense, defense),
-          homeScore: homeRun,
-          awayScore: awayRun,
-          possessionTeam: offenseSide,
-        });
-      }
-
-      if (shouldScore) {
-        const pts = drive!.points;
-        if (drive!.team === 'home') homeRun += pts;
-        else                        awayRun += pts;
-        events.push({
-          quarter:     q,
-          type:        'SCORE',
-          text:        scoringText(offense, defense, pts),
-          homeScore:   homeRun,
-          awayScore:   awayRun,
-          points:      pts,
-          scoringTeam: drive!.team,
-          possessionTeam: drive!.team,
-        });
-        scoringIndex++;
-        possession = drive!.points === 2 ? drive!.team : otherSide(drive!.team);
-      } else {
-        const kind: 'PUNT' | 'TURNOVER' = Math.random() < 0.78 ? 'PUNT' : 'TURNOVER';
-        events.push({
-          quarter:   q,
-          type:      kind,
-          text:      kind === 'PUNT' ? puntText(offense) : turnoverText(offense, defense),
-          homeScore: homeRun,
-          awayScore: awayRun,
-          possessionTeam: offenseSide,
-        });
-        possession = defenseSide;
-      }
-      driveCount++;
+    // Drive resolution event
+    if (drive.result === 'TD') {
+      homeRun += drive.scoringSide === 'home' ? drive.points : 0;
+      awayRun += drive.scoringSide === 'away' ? drive.points : 0;
+      events.push({
+        quarter: drive.quarter, type: 'SCORE', points: drive.points,
+        text: `${off.name} finds the end zone — TOUCHDOWN!`,
+        homeScore: homeRun, awayScore: awayRun,
+        scoringTeam: drive.scoringSide!, possessionTeam: drive.scoringSide!,
+      });
+    } else if (drive.result === 'FG') {
+      const yards = 100 - drive.endYardLine + 17;
+      homeRun += drive.scoringSide === 'home' ? drive.points : 0;
+      awayRun += drive.scoringSide === 'away' ? drive.points : 0;
+      events.push({
+        quarter: drive.quarter, type: 'SCORE', points: drive.points,
+        text: `${off.name} settles for three from ${Math.round(yards)} out. Field goal is good.`,
+        homeScore: homeRun, awayScore: awayRun,
+        scoringTeam: drive.scoringSide!, possessionTeam: drive.scoringSide!,
+      });
+    } else if (drive.result === 'MISSED_FG') {
+      const yards = 100 - drive.endYardLine + 17;
+      events.push({
+        quarter: drive.quarter, type: 'PLAY',
+        text: `${off.name}'s ${Math.round(yards)}-yard field goal attempt is NO GOOD.`,
+        homeScore: homeRun, awayScore: awayRun,
+        possessionTeam: drive.side,
+      });
+    } else if (drive.result === 'DEFENSIVE_TD') {
+      homeRun += drive.scoringSide === 'home' ? drive.points : 0;
+      awayRun += drive.scoringSide === 'away' ? drive.points : 0;
+      events.push({
+        quarter: drive.quarter, type: 'SCORE', points: drive.points,
+        text: `INTERCEPTED AND RETURNED FOR A TOUCHDOWN — ${def.name} takes it the distance!`,
+        homeScore: homeRun, awayScore: awayRun,
+        scoringTeam: drive.scoringSide!, possessionTeam: drive.scoringSide!,
+      });
+    } else if (drive.result === 'SAFETY') {
+      homeRun += drive.scoringSide === 'home' ? drive.points : 0;
+      awayRun += drive.scoringSide === 'away' ? drive.points : 0;
+      events.push({
+        quarter: drive.quarter, type: 'SCORE', points: drive.points,
+        text: `SAFETY! ${def.name} forces the takedown in the end zone — two points.`,
+        homeScore: homeRun, awayScore: awayRun,
+        scoringTeam: drive.scoringSide!, possessionTeam: drive.scoringSide!,
+      });
+    } else if (drive.result === 'PUNT') {
+      events.push({
+        quarter: drive.quarter, type: 'PUNT',
+        text: `${off.name} punts.`,
+        homeScore: homeRun, awayScore: awayRun,
+        possessionTeam: drive.side,
+      });
+    } else if (drive.result === 'TURNOVER' || drive.result === 'TURNOVER_ON_DOWNS') {
+      const last = drive.plays[drive.plays.length - 1];
+      const kind = last?.scoringEvent;
+      const text =
+        kind === 'INT' ? `INTERCEPTION! ${def.name} comes down with it. ${def.name} ball.`
+        : kind === 'FUMBLE' ? `FUMBLE! ${def.name} recovers it. ${def.name} ball.`
+        : `${off.name} turns it over on downs. ${def.name} takes over.`;
+      events.push({
+        quarter: drive.quarter, type: 'TURNOVER', text,
+        homeScore: homeRun, awayScore: awayRun,
+        possessionTeam: drive.side,
+      });
     }
 
-    if (q === 2) {
-      events.push({
-        quarter:   2,
-        type:      'HALFTIME',
-        text:      `Halftime — ${home.name} ${homeRun}, ${away.name} ${awayRun}.`,
-        homeScore: homeRun,
-        awayScore: awayRun,
-      });
+    if (!halftimeFired && drive.quarter >= 2) {
+      // Fire halftime after the last drive of Q2.
+      const nextDriveQuarter = result.drives[result.drives.indexOf(drive) + 1]?.quarter;
+      if (!nextDriveQuarter || nextDriveQuarter >= 3) {
+        events.push({
+          quarter: 2, type: 'HALFTIME',
+          text: `Halftime — ${home.name} ${homeRun}, ${away.name} ${awayRun}.`,
+          homeScore: homeRun, awayScore: awayRun,
+        });
+        halftimeFired = true;
+      }
     }
   }
 
   events.push({
-    quarter:   4,
-    type:      'FINAL',
-    text:      `FINAL — ${home.name} ${homeRun}, ${away.name} ${awayRun}.`,
-    homeScore: homeRun,
-    awayScore: awayRun,
+    quarter: 4, type: 'FINAL',
+    text: `FINAL — ${home.name} ${result.homeScore}, ${away.name} ${result.awayScore}.`,
+    homeScore: result.homeScore, awayScore: result.awayScore,
   });
 
   return events;
 }
 
-function otherSide(side: 'home' | 'away'): 'home' | 'away' {
-  return side === 'home' ? 'away' : 'home';
+function snap(home: TeamSnapshot, away: TeamSnapshot, side: 'home' | 'away'): TeamSnapshot {
+  return side === 'home' ? home : away;
 }
 
-// ─── Player picking ─────────────────────────────────────────
-function pickByPosition(team: TeamSnapshot, positions: string[]): TopPlayer | null {
-  return team.topPlayers.find((p) => positions.includes(p.position)) ?? null;
+function otherSide(s: 'home' | 'away'): 'home' | 'away' {
+  return s === 'home' ? 'away' : 'home';
 }
 
-function pickRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+function playText(off: TeamSnapshot, def: TeamSnapshot, play: PlayEvent): string {
+  const offName = playNameById(play.offensePlayId);
+  const defName = playNameById(play.defensePlayId);
+  const downStr = downAndDistance(play.down, play.distance);
 
-// ─── Setup play narration ───────────────────────────────────
-function setupPlayText(off: TeamSnapshot, def: TeamSnapshot): string {
-  const passWeight =
-    off.offenseStyle === 'PASS_HEAVY' ? 0.72 :
-    off.offenseStyle === 'RUN_HEAVY'  ? 0.30 :
-    0.50;
-  const isPass = Math.random() < passWeight;
-
-  // Aggressive defense gets occasional disruption flavor on either play type.
-  const aggressiveDef = def.defenseStyle === 'AGGRESSIVE' && Math.random() < 0.18;
-  if (aggressiveDef) {
-    const rusher = pickByPosition(def, ['DE', 'DT', 'LB']);
-    const qb     = pickByPosition(off, ['QB']);
-    if (rusher && qb) {
-      return pickRandom([
-        `Pressure! ${teamPlayer(def, rusher)} closes on ${teamPlayer(off, qb)} — incomplete.`,
-        `${teamPlayer(def, rusher)} bursts off the edge, forces ${teamPlayer(off, qb)} to throw it away.`,
-        `${teamPlayer(def, rusher)} disrupts the pocket and ${teamPlayer(off, qb)} has to scramble.`,
-      ]);
-    }
+  if (play.scoringEvent === 'TD') {
+    return `${downStr}: ${off.name} ${offName} for ${play.yards} — TOUCHDOWN!`;
+  }
+  if (play.scoringEvent === 'INT') {
+    return `${downStr}: ${off.name} ${offName} — INTERCEPTED by ${def.name}.`;
+  }
+  if (play.scoringEvent === 'FUMBLE') {
+    return `${downStr}: ${off.name} ${offName} — FUMBLE! ${def.name} recovers.`;
+  }
+  if (play.scoringEvent === 'TURNOVER_ON_DOWNS') {
+    return `${downStr}: ${off.name} ${offName} stuffed. Turnover on downs.`;
+  }
+  if (play.scoringEvent === 'SAFETY') {
+    return `${downStr}: ${off.name} pinned in the end zone — SAFETY.`;
   }
 
-  if (isPass) return passSetupText(off, def);
-  return runSetupText(off, def);
-}
-
-function teamPlayer(team: TeamSnapshot, player: TopPlayer | null): string {
-  return player ? `${team.name} ${player.position} ${player.name}` : team.name;
-}
-
-function passSetupText(off: TeamSnapshot, def: TeamSnapshot): string {
-  const qb       = pickByPosition(off, ['QB']);
-  const receiver = pickByPosition(off, ['WR']) ?? pickByPosition(off, ['TE']);
-  const cb       = pickByPosition(def, ['CB', 'S']);
-  const yards    = 4 + Math.floor(Math.random() * 24);
-  const incomplete = Math.random() < 0.18;
-
-  if (incomplete) {
-    if (qb && cb) {
-      return pickRandom([
-        `${teamPlayer(off, qb)} has the pass batted down by ${teamPlayer(def, cb)}. Incomplete.`,
-        `${teamPlayer(off, qb)} fires high — ${teamPlayer(def, cb)} blankets the play. Incomplete.`,
-        `${teamPlayer(off, qb)} looks deep, no one open. Throws it away.`,
-      ]);
-    }
-    return `Pass falls incomplete.`;
+  switch (play.resultLabel) {
+    case 'GREAT_OFFENSE':
+      return `${downStr}: ${off.name} ${offName} explodes for ${play.yards} yards against ${defName}.`;
+    case 'OFFENSIVE_GAIN':
+      return `${downStr}: ${off.name} ${offName} picks up ${play.yards} on ${defName}.`;
+    case 'NEUTRAL':
+      return play.yards <= 0
+        ? `${downStr}: ${off.name} ${offName} stuffed for no gain by ${def.name}.`
+        : `${downStr}: ${off.name} ${offName} for ${play.yards}.`;
+    case 'DEFENSIVE_STOP':
+      return `${downStr}: ${def.name} ${defName} holds ${off.name} to ${play.yards} yards.`;
+    case 'GREAT_DEFENSE':
+      return `${downStr}: ${def.name} ${defName} blows up the play — ${play.yards} yard loss.`;
   }
-
-  if (qb && receiver) {
-    if (off.offenseStyle === 'PASS_HEAVY') {
-      return pickRandom([
-        `${teamPlayer(off, qb)} hits ${teamPlayer(off, receiver)} on a deep crosser for ${yards}.`,
-        `${teamPlayer(off, qb)} drops back and finds ${teamPlayer(off, receiver)} for a ${yards}-yard gain.`,
-        `${teamPlayer(off, qb)} airs it out to ${teamPlayer(off, receiver)} — ${yards} yards down the field.`,
-      ]);
-    }
-    return pickRandom([
-      `${teamPlayer(off, qb)} finds ${teamPlayer(off, receiver)} on a quick out for ${yards}.`,
-      `${teamPlayer(off, qb)} to ${teamPlayer(off, receiver)} on a slant — ${yards} yards.`,
-      `Short completion from ${teamPlayer(off, qb)} to ${teamPlayer(off, receiver)}, ${yards} yards.`,
-    ]);
-  }
-  if (qb) return `${teamPlayer(off, qb)} threads it for a ${yards}-yard pickup.`;
-  return `Pass complete for ${yards} yards.`;
 }
 
-function runSetupText(off: TeamSnapshot, def: TeamSnapshot): string {
-  const rb     = pickByPosition(off, ['RB']);
-  const ol     = pickByPosition(off, ['OL']);
-  const tackler = pickByPosition(def, ['LB', 'S', 'DE']);
-  const yards  = off.offenseStyle === 'RUN_HEAVY'
-    ? 2 + Math.floor(Math.random() * 14)
-    : 1 + Math.floor(Math.random() * 9);
-  const stuffed = Math.random() < 0.15;
-
-  if (stuffed && rb && tackler) {
-    return pickRandom([
-      `${teamPlayer(def, tackler)} meets ${teamPlayer(off, rb)} in the backfield. Loss of one.`,
-      `${teamPlayer(off, rb)} stopped at the line by ${teamPlayer(def, tackler)}. No gain.`,
-      `${teamPlayer(off, rb)} swallowed up by ${teamPlayer(def, tackler)} for a short loss.`,
-    ]);
-  }
-
-  if (rb) {
-    if (off.offenseStyle === 'RUN_HEAVY') {
-      const olName = ol?.name ? `behind ${teamPlayer(off, ol)}` : 'behind the line';
-      return pickRandom([
-        `${teamPlayer(off, rb)} pounds it ${olName} for ${yards}.`,
-        `${teamPlayer(off, rb)} grinds out ${yards} hard yards on the ground.`,
-        `Hand-off to ${teamPlayer(off, rb)}, ${yards}-yard gain to move the chains.`,
-      ]);
-    }
-    return pickRandom([
-      `${teamPlayer(off, rb)} takes the carry for ${yards}.`,
-      `${teamPlayer(off, rb)} bounces it outside — ${yards}-yard pickup.`,
-      `${teamPlayer(off, rb)} finds the cutback for ${yards}.`,
-    ]);
-  }
-  return `Rush for ${yards} yards.`;
+function playNameById(id: string): string {
+  const p = playById(id);
+  return p?.name ?? CATEGORY_LABEL[(p as any)?.category as keyof typeof CATEGORY_LABEL] ?? 'play';
 }
 
-// ─── Scoring narration ──────────────────────────────────────
-function scoringText(off: TeamSnapshot, def: TeamSnapshot, points: number): string {
-  if (points === 7) return tdWithXp(off);
-  if (points === 6) return tdMissedXp(off);
-  if (points === 8) return tdTwoPoint(off);
-  if (points === 3) return fgText(off);
-  if (points === 2) return safetyText(off, def);
-  return `${off.name} adds ${points}.`;
-}
-
-function tdWithXp(off: TeamSnapshot): string {
-  return `${tdSentence(off)} Extra point is good.`;
-}
-
-function tdMissedXp(off: TeamSnapshot): string {
-  return `${tdSentence(off)} Extra point is NO GOOD! ${off.name} leaves one on the board.`;
-}
-
-function tdTwoPoint(off: TeamSnapshot): string {
-  return `${tdSentence(off)} Two-point conversion is GOOD — eight on the drive.`;
-}
-
-function tdSentence(off: TeamSnapshot): string {
-  const qb       = pickByPosition(off, ['QB']);
-  const receiver = pickByPosition(off, ['WR']) ?? pickByPosition(off, ['TE']);
-  const rb       = pickByPosition(off, ['RB']);
-  const isPass   = (off.offenseStyle === 'PASS_HEAVY' && Math.random() < 0.78) ||
-                   (off.offenseStyle === 'BALANCED' && Math.random() < 0.55) ||
-                   (off.offenseStyle === 'RUN_HEAVY' && Math.random() < 0.32);
-
-  if (isPass && qb && receiver) {
-    return pickRandom([
-      `${teamPlayer(off, qb)} finds ${teamPlayer(off, receiver)} in the end zone — TOUCHDOWN ${off.name}!`,
-      `${teamPlayer(off, qb)} drops a dime to ${teamPlayer(off, receiver)} — TOUCHDOWN ${off.name}!`,
-      `Long ball from ${teamPlayer(off, qb)} to ${teamPlayer(off, receiver)}. ${off.name} walks it in. TD!`,
-    ]);
-  }
-  if (!isPass && rb) {
-    return pickRandom([
-      `${teamPlayer(off, rb)} pounds it in from short range — TOUCHDOWN ${off.name}!`,
-      `${teamPlayer(off, rb)} breaks free, finishes it — TD ${off.name}!`,
-      `Hand-off to ${teamPlayer(off, rb)}, into the end zone — TOUCHDOWN ${off.name}!`,
-    ]);
-  }
-  return pickRandom([
-    `${off.name} caps the drive — TOUCHDOWN!`,
-    `${off.name} finishes in the red zone for the score.`,
-  ]);
-}
-
-function fgText(off: TeamSnapshot): string {
-  const yards = 28 + Math.floor(Math.random() * 24);
-  return pickRandom([
-    `${off.name} settles for three from ${yards} out.`,
-    `${off.name} stalls in the red zone — ${yards}-yard FG is good.`,
-    `${off.name} kicks the ${yards}-yard field goal.`,
-  ]);
-}
-
-function safetyText(off: TeamSnapshot, def: TeamSnapshot): string {
-  const rusher = pickByPosition(def, ['DE', 'DT', 'LB']);
-  if (rusher) {
-    return `Safety! ${teamPlayer(def, rusher)} drops the ball-carrier in the end zone — two points ${def.name}.`;
-  }
-  return `Safety! ${def.name} forces the takedown in the end zone — two points ${def.name}.`;
-}
-
-// ─── Filler narration ───────────────────────────────────────
-function puntText(off: TeamSnapshot): string {
-  return pickRandom([
-    `${off.name}'s drive stalls. Punt team comes on.`,
-    `${off.name} punts after a three-and-out.`,
-    `Three-and-out for ${off.name}. They flip the field.`,
-  ]);
-}
-
-function turnoverText(off: TeamSnapshot, def: TeamSnapshot): string {
-  const qb       = pickByPosition(off, ['QB']);
-  const defender = pickByPosition(def, ['CB', 'S', 'LB']);
-  if (Math.random() < 0.55 && qb && defender) {
-    return pickRandom([
-      `INTERCEPTION! ${teamPlayer(def, defender)} jumps the route on ${teamPlayer(off, qb)}. ${def.name} ball.`,
-      `${teamPlayer(off, qb)} airs it up — picked by ${teamPlayer(def, defender)}! ${def.name} takes over.`,
-      `${teamPlayer(def, defender)} reads ${teamPlayer(off, qb)}'s eyes and snags the pick.`,
-    ]);
-  }
-  if (defender) {
-    return pickRandom([
-      `Fumble! ${teamPlayer(def, defender)} forces it loose and ${def.name} recovers.`,
-      `${teamPlayer(def, defender)} pops the ball free — ${def.name} ball.`,
-    ]);
-  }
-  return `${def.name} forces the turnover! ${def.name} ball.`;
+function downAndDistance(down: number, distance: number): string {
+  const ord = down === 1 ? '1st' : down === 2 ? '2nd' : down === 3 ? '3rd' : '4th';
+  if (distance >= 50) return `${ord} & long`;
+  return `${ord} & ${Math.max(1, distance)}`;
 }
