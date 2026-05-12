@@ -1,0 +1,7 @@
+-- AlterTable
+ALTER TABLE "Player" ADD COLUMN     "conditioning" INTEGER NOT NULL DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "Team" ADD COLUMN     "healWeek" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "recruitWeek" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "trainWeek" INTEGER NOT NULL DEFAULT 0;

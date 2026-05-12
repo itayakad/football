@@ -1,0 +1,33 @@
+{
+  "name": "football-manager-backend",
+  "version": "1.0.0",
+  "description": "Football Manager - Simulation Engine",
+  "scripts": {
+    "simulate": "ts-node src/simulate.ts",
+    "sim:multi": "ts-node src/multiSeason.ts",
+    "seed": "ts-node src/seed.ts",
+    "expand-leagues": "ts-node src/expandLeagues.ts",
+    "api": "ts-node src/api/server.ts",
+    "api:dev": "nodemon --exec ts-node src/api/server.ts",
+    "dev": "nodemon --exec ts-node src/app.ts",
+    "build": "tsc",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "nodemon": "^3.1.7",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.7.9",
+    "prisma": "^5.22.0"
+  }
+}

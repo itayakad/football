@@ -1,0 +1,7 @@
+-- AlterTable
+ALTER TABLE "Player" ADD COLUMN     "contractYearsLeft" INTEGER NOT NULL DEFAULT 2,
+ADD COLUMN     "extensionEligible" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "injuryStatus" TEXT NOT NULL DEFAULT 'HEALTHY',
+ADD COLUMN     "injuryType" TEXT,
+ADD COLUMN     "injuryWeeks" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "salary" INTEGER NOT NULL DEFAULT 2500000;

@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OffenseStyle {
+  RUN_HEAVY
+  BALANCED
+  PASS_HEAVY
+}
+
+enum DefenseStyle {
+  AGGRESSIVE
+  BALANCED
+  PREVENT
+}
+
+enum Tempo {
+  SLOW
+  NORMAL
+  FAST
+}
+
+enum OffensivePhilosophy {
+  WEST_COAST
+  VERTICAL_SPREAD
+  SMASHMOUTH
+  RPO_HEAVY
+  QUICK_GAME
+  PLAY_ACTION_HEAVY
+}
+
+model League {
+  id    String @id @default(cuid())
+  name  String
+  tier  Int
+  teams Team[]
+  seasonHistories LeagueSeasonHistory[]
+}
+
+model Team {
+  id            String       @id @default(cuid())
+  name          String
+  leagueId      String
+  league        League       @relation(fields: [leagueId], references: [id])
+  offenseRating Int
+  defenseRating Int
+  offenseStyle  OffenseStyle @default(BALANCED)
+  offensivePhilosophy OffensivePhilosophy @default(WEST_COAST)
+  defenseStyle  DefenseStyle @default(BALANCED)
+  tempo         Tempo        @default(NORMAL)
+  money         Int          @default(150000000)
+  morale        Int          @default(70)
+  // Per-week cooldowns for staff actions. Stores the week number the action
+  // was last used; rebuildSchedule resets all to 0 between seasons.
+  trainWeek     Int          @default(0)
+  healWeek      Int          @default(0)
+  recruitWeek   Int          @default(0)
+  players       Player[]
+  coaches       Coach[]
+  schemes       TeamScheme[]
+  listings      TransferListing[]
+  transferOffers TransferOffer[]
+  teamSeasonHistories TeamSeasonHistory[]
+  homeMatches   Match[]      @relation("HomeTeam")
+  awayMatches   Match[]      @relation("AwayTeam")
+}
+
+model TeamScheme {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+  unit      String
+  name      String
+  plays     Json
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teamId, unit])
+  @@unique([teamId, unit, name])
+}
+
+model Coach {
+  id                    String   @id @default(cuid())
+  name                  String
+  role                  String
+  philosophy            String
+  developmentSpecialty  String
+  aggression            Int
+  moraleImpact          Int
+  preferredTempo        Tempo
+  reputation            Int
+  careerWins            Int      @default(0)
+  careerLosses          Int      @default(0)
+  titles                Int      @default(0)
+  hotSeat               Int      @default(20)
+  yearsWithTeam         Int      @default(1)
+  age                   Int      @default(48)
+  teamId                String?
+  team                  Team?    @relation(fields: [teamId], references: [id])
+}
+
+model Player {
+  id                 String  @id @default(cuid())
+  name               String
+  position           String
+  overall            Int
+  potential          Int
+  age                Int
+  morale             Int     @default(70)
+  fatigue            Int     @default(0)
+  // Weeks of conditioning buff remaining. While > 0, post-match injury chance
+  // is multiplied by ~0.4. Decrements by 1 each match week.
+  conditioning       Int     @default(0)
+  injuryStatus       String  @default("HEALTHY")
+  injuryType         String?
+  injuryWeeks        Int     @default(0)
+  depthOrder         Int     @default(0)
+  salary             Int     @default(2500000)
+  contractYearsLeft  Int     @default(2)
+  extensionEligible  Boolean @default(false)
+  teamId             String
+  team               Team    @relation(fields: [teamId], references: [id])
+  transferListing    TransferListing?
+}
+
+model TransferListing {
+  id           String   @id @default(cuid())
+  playerId     String   @unique
+  player       Player   @relation(fields: [playerId], references: [id])
+  sellerTeamId String
+  sellerTeam   Team     @relation(fields: [sellerTeamId], references: [id])
+  askingPrice  Int
+  status       String   @default("ACTIVE")
+  createdAt    DateTime @default(now())
+  offers       TransferOffer[]
+}
+
+model TransferOffer {
+  id             String          @id @default(cuid())
+  listingId      String
+  listing        TransferListing @relation(fields: [listingId], references: [id])
+  buyerTeamId    String
+  buyerTeam      Team            @relation(fields: [buyerTeamId], references: [id])
+  amount         Int
+  status         String          @default("PENDING")
+  createdAt      DateTime        @default(now())
+}
+
+model SeasonHistory {
+  id        String   @id @default(cuid())
+  season    Int
+  createdAt DateTime @default(now())
+  leagues   LeagueSeasonHistory[]
+  teams     TeamSeasonHistory[]
+}
+
+model LeagueSeasonHistory {
+  id               String        @id @default(cuid())
+  seasonHistoryId  String
+  seasonHistory    SeasonHistory @relation(fields: [seasonHistoryId], references: [id])
+  season           Int
+  leagueId         String
+  league           League        @relation(fields: [leagueId], references: [id])
+  leagueName       String
+  tier             Int
+  championTeamId   String
+  championTeamName String
+  mvpPlayerId      String?
+  mvpPlayerName    String?
+  mvpTeamName      String?
+  biggestGame      String?
+  standings        Json
+  awards           Json?
+  playoffBracket   Json?
+  createdAt        DateTime      @default(now())
+
+  @@unique([season, leagueId])
+}
+
+model TeamSeasonHistory {
+  id               String        @id @default(cuid())
+  seasonHistoryId  String
+  seasonHistory    SeasonHistory @relation(fields: [seasonHistoryId], references: [id])
+  season           Int
+  teamId           String
+  team             Team          @relation(fields: [teamId], references: [id])
+  teamName         String
+  leagueName       String
+  tier             Int
+  rank             Int
+  wins             Int
+  losses           Int
+  ties             Int
+  pointsFor        Int
+  pointsAgainst    Int
+  diff             Int
+  resultLabel      String
+  createdAt        DateTime      @default(now())
+
+  @@unique([season, teamId])
+}
+
+model TradeHistory {
+  id           String   @id @default(cuid())
+  season       Int
+  playerId     String
+  playerName   String
+  fromTeamId   String
+  fromTeamName String
+  toTeamId     String
+  toTeamName   String
+  fee          Int
+  story        String
+  createdAt    DateTime @default(now())
+}
+
+model RetirementHistory {
+  id         String   @id @default(cuid())
+  season     Int
+  playerId   String
+  playerName String
+  teamId     String
+  teamName   String
+  age        Int
+  overall    Int
+  story      String
+  createdAt  DateTime @default(now())
+}
+
+model Match {
+  id           String  @id @default(cuid())
+  homeTeamId   String
+  awayTeamId   String
+  homeTeam     Team    @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam     Team    @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  homeScore    Int     @default(0)
+  awayScore    Int     @default(0)
+  week         Int
+  played       Boolean @default(false)
+  leagueId     String
+  // null for regular season; "WILD_CARD" | "SEMI" | "FINAL" for playoffs.
+  playoffRound String?
+  // Per-match tactical gameplans for each side. Set by AI coach pre-match,
+  // overridable by user for their team. Shape: { offensiveConcepts, defensiveCounters, tempoOverride }.
+  homeGameplan Json?
+  awayGameplan Json?
+}
