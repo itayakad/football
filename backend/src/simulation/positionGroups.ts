@@ -9,9 +9,6 @@ export interface PositionGroups {
 interface PlayerLike {
   position: string;
   overall: number;
-  fatigue?: number;
-  injuryStatus?: string;
-  injuryWeeks?: number;
 }
 
 function avg(values: number[]): number {
@@ -21,7 +18,7 @@ function avg(values: number[]): number {
 
 export function computePositionGroups(players: PlayerLike[]): PositionGroups {
   const ratings = (positions: string[]) =>
-    players.filter((p) => positions.includes(p.position)).map((p) => adjustedOverall(p));
+    players.filter((p) => positions.includes(p.position)).map((p) => p.overall);
 
   return {
     qb:             avg(ratings(['QB'])),
@@ -30,15 +27,4 @@ export function computePositionGroups(players: PlayerLike[]): PositionGroups {
     frontSeven:     avg(ratings(['DE', 'DT', 'LB'])),
     secondary:      avg(ratings(['CB', 'S'])),
   };
-}
-
-function adjustedOverall(player: PlayerLike): number {
-  const fatigue = player.fatigue ?? 0;
-  const fatiguePenalty = fatigue >= 80 ? 8 : fatigue >= 60 ? 5 : fatigue >= 40 ? 2 : 0;
-  const injuryPenalty =
-    player.injuryStatus === 'MULTI_WEEK' && (player.injuryWeeks ?? 0) > 0 ? 18 :
-    player.injuryStatus === 'MINOR' ? 8 :
-    player.injuryStatus === 'QUESTIONABLE' ? 4 :
-    0;
-  return Math.max(35, player.overall - fatiguePenalty - injuryPenalty);
 }

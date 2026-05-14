@@ -4,7 +4,6 @@ import { Gameplan, normalizeGameplan } from '../simulation/gameplan';
 import { chooseAIGameplan } from '../simulation/aiCoach';
 import { normalizePlayLoadout } from '../simulation/playLibrary';
 import { generateMatchFeed, FeedEvent } from './feedGenerator';
-import { buildPostMatchHealthUpdates } from '../simulation/playerHealth';
 import { advanceOffseason, OffseasonResult } from '../simulation/offseason';
 
 export interface SingleMatchResult {
@@ -19,12 +18,8 @@ export interface SingleMatchResult {
   keyMatchup:     string;
   quarterScores:  Array<[number, number]>;
   events:         FeedEvent[];
-  moraleChange:   { home: number; away: number };
-  injuryReport:   Array<{ playerId: string; playerName: string; teamId: string; status: string; type: string | null; weeks: number }>;
   seasonAdvance:  OffseasonResult | null;
 }
-
-const MORALE_SWING = 5;
 
 const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
   QB: 1, RB: 2, WR: 3, TE: 1, OL: 5, DE: 2, DT: 2, LB: 3, CB: 3, S: 2,
@@ -82,8 +77,6 @@ export async function simulateSingleMatch(
 
   const isUserHome = userTeamId === match.homeTeamId;
   const isUserAway = userTeamId === match.awayTeamId;
-  if (isUserHome && hasOutStarter(match.homeTeam.players)) throw new Error('Out starter must be subbed out');
-  if (isUserAway && hasOutStarter(match.awayTeam.players)) throw new Error('Out starter must be subbed out');
 
   const homeGameplan: Gameplan = isUserHome && userGameplan
     ? normalizeGameplan(userGameplan)
@@ -105,22 +98,20 @@ export async function simulateSingleMatch(
     },
   });
 
-  const moraleChange = await updateMoraleAfterMatch(match.homeTeamId, match.awayTeamId, result.homeScore, result.awayScore);
-  const injuryReport = await updatePlayerHealthAfterMatch(
-    { id: match.homeTeamId, offenseStyle: match.homeTeam.offenseStyle, defenseStyle: match.homeTeam.defenseStyle, tempo: match.homeTeam.tempo, players: match.homeTeam.players },
-    { id: match.awayTeamId, offenseStyle: match.awayTeam.offenseStyle, defenseStyle: match.awayTeam.defenseStyle, tempo: match.awayTeam.tempo, players: match.awayTeam.players },
-    homeGameplan,
-    awayGameplan,
-  );
-
   const events = generateMatchFeed(
     { name: match.homeTeam.name, side: 'home', topPlayers: pickTopPlayers(match.homeTeam.players) },
     { name: match.awayTeam.name, side: 'away', topPlayers: pickTopPlayers(match.awayTeam.players) },
     result,
   );
 
-  await simulateRestOfWeek(match.week, matchId);
+  // Fire-and-forget: simulate other week games in the background so the
+  // response returns to the frontend immediately.
+  simulateRestOfWeek(match.week, matchId).catch((err) =>
+    console.error('[simulateRestOfWeek] background error:', err),
+  );
 
+  // Season-advance check: run after a short yield so background work can
+  // settle, but still within the same request for simplicity.
   const remaining = await prisma.match.count({ where: { played: false } });
   const seasonAdvance = remaining === 0 ? await advanceOffseason() : null;
 
@@ -136,14 +127,8 @@ export async function simulateSingleMatch(
     keyMatchup:    result.keyMatchup,
     quarterScores: result.quarterScores,
     events,
-    moraleChange,
-    injuryReport,
     seasonAdvance,
   };
-}
-
-function hasOutStarter(players: Array<{ id: string; position: string; overall: number; depthOrder?: number | null; injuryStatus?: string }>): boolean {
-  return activeDepthPlayers(players).some((player) => player.injuryStatus === 'MULTI_WEEK');
 }
 
 async function simulateRestOfWeek(week: number, excludeMatchId: string): Promise<void> {
@@ -155,7 +140,8 @@ async function simulateRestOfWeek(week: number, excludeMatchId: string): Promise
     },
   });
 
-  for (const m of others) {
+  // Simulate all remaining games in parallel — no need to block on each other.
+  await Promise.all(others.map(async (m) => {
     const home: TeamMatchProfile = {
       id:       m.homeTeamId,
       name:     m.homeTeam.name,
@@ -186,15 +172,7 @@ async function simulateRestOfWeek(week: number, excludeMatchId: string): Promise
         awayGameplan: awayGameplan as any,
       },
     });
-
-    await updateMoraleAfterMatch(m.homeTeamId, m.awayTeamId, r.homeScore, r.awayScore);
-    await updatePlayerHealthAfterMatch(
-      { id: m.homeTeamId, offenseStyle: m.homeTeam.offenseStyle, defenseStyle: m.homeTeam.defenseStyle, tempo: m.homeTeam.tempo, players: m.homeTeam.players },
-      { id: m.awayTeamId, offenseStyle: m.awayTeam.offenseStyle, defenseStyle: m.awayTeam.defenseStyle, tempo: m.awayTeam.tempo, players: m.awayTeam.players },
-      homeGameplan,
-      awayGameplan,
-    );
-  }
+  }));
 }
 
 function pickTopPlayers(players: Array<{ name: string; position: string; overall: number }>) {
@@ -207,65 +185,4 @@ function pickTopPlayers(players: Array<{ name: string; position: string; overall
     if (best) result.push({ name: best.name, position: best.position, overall: best.overall });
   }
   return result;
-}
-
-async function updatePlayerHealthAfterMatch(
-  home: { id: string; offenseStyle: string; defenseStyle: string; tempo: string; players: any[] },
-  away: { id: string; offenseStyle: string; defenseStyle: string; tempo: string; players: any[] },
-  homeGameplan: Gameplan,
-  awayGameplan: Gameplan,
-): Promise<Array<{ playerId: string; playerName: string; teamId: string; status: string; type: string | null; weeks: number }>> {
-  const updates = [
-    ...buildPostMatchHealthUpdates(home, homeGameplan).map((update) => ({ ...update, teamId: home.id, sourcePlayers: home.players })),
-    ...buildPostMatchHealthUpdates(away, awayGameplan).map((update) => ({ ...update, teamId: away.id, sourcePlayers: away.players })),
-  ];
-  const report: Array<{ playerId: string; playerName: string; teamId: string; status: string; type: string | null; weeks: number }> = [];
-
-  for (const update of updates) {
-    const player = update.sourcePlayers.find((candidate) => candidate.id === update.playerId);
-    const previousStatus = player?.injuryStatus ?? 'HEALTHY';
-    await prisma.player.update({
-      where: { id: update.playerId },
-      data: {
-        fatigue:      update.fatigue,
-        injuryStatus: update.injuryStatus,
-        injuryType:   update.injuryType,
-        injuryWeeks:  update.injuryWeeks,
-        conditioning: update.conditioning,
-      },
-    });
-
-    if (update.injuryStatus !== 'HEALTHY' && update.injuryStatus !== previousStatus) {
-      report.push({
-        playerId:   update.playerId,
-        playerName: player?.name ?? 'Unknown Player',
-        teamId:     update.teamId,
-        status:     update.injuryStatus,
-        type:       update.injuryType,
-        weeks:      update.injuryWeeks,
-      });
-    }
-  }
-
-  return report;
-}
-
-async function updateMoraleAfterMatch(
-  homeId: string, awayId: string, homeScore: number, awayScore: number,
-): Promise<{ home: number; away: number }> {
-  let homeDelta = 0, awayDelta = 0;
-  if (homeScore > awayScore)      { homeDelta = +MORALE_SWING; awayDelta = -MORALE_SWING; }
-  else if (awayScore > homeScore) { awayDelta = +MORALE_SWING; homeDelta = -MORALE_SWING; }
-
-  const teams = await prisma.team.findMany({
-    where:  { id: { in: [homeId, awayId] } },
-    select: { id: true, morale: true },
-  });
-  for (const t of teams) {
-    const delta = t.id === homeId ? homeDelta : awayDelta;
-    const newMorale = Math.max(0, Math.min(100, t.morale + delta));
-    await prisma.team.update({ where: { id: t.id }, data: { morale: newMorale } });
-  }
-
-  return { home: homeDelta, away: awayDelta };
 }

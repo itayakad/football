@@ -1,6 +1,8 @@
 // Type-safe navigation params for the root stack.
 export type RootStackParamList = {
-  Tabs:             undefined;
+  Home:             undefined;
+  Team:             undefined;
+  League:           undefined;
   MatchPreview:     { matchId: string };
   MatchSim:         { matchId: string; userTeamId: string };
   Postgame:         { result: import('../api/types').SimulateResponse; userTeamId: string };
@@ -8,10 +10,4 @@ export type RootStackParamList = {
   SeasonAwards:    { offseason: import('../api/types').OffseasonResponse; userTeamId: string };
   SeasonTransition: { offseason: import('../api/types').OffseasonResponse; userTeamId: string };
   PlayoffBracket:  { offseason: import('../api/types').OffseasonResponse; userTeamId: string };
-};
-
-export type TabParamList = {
-  Team:    undefined;
-  Home:    undefined;
-  League:  undefined;
 };

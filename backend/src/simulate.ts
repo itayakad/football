@@ -51,7 +51,7 @@ async function printLeague(result: LeagueResult): Promise<void> {
   const teamIds = result.standings.map((s) => s.teamId);
   const teams   = await prisma.team.findMany({
     where:  { id: { in: teamIds } },
-    select: { id: true, offenseStyle: true, defenseStyle: true, tempo: true },
+    select: { id: true, offenseStyle: true, defenseStyle: true },
   });
   const styleMap = new Map(teams.map((t) => [t.id, t]));
 
@@ -88,7 +88,7 @@ async function printLeague(result: LeagueResult): Promise<void> {
   console.log('  ' + LINE);
   const champ  = result.standings[0];
   const cStyle = styleMap.get(champ.teamId);
-  const cAbbr  = cStyle ? `[${cStyle.tempo} tempo, ${cStyle.offenseStyle.replace('_', '-')} offense]` : '';
+  const cAbbr  = cStyle ? `[${cStyle.offenseStyle.replace('_', '-')} offense]` : '';
   console.log(`  Champion: ${champ.teamName}  ${cAbbr}`);
 }
 

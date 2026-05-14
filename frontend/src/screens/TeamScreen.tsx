@@ -12,9 +12,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
 
 import { api } from '../api/client';
-import { MarketResponse, RosterPlayer, RosterResponse, StaffActionEntry } from '../api/types';
+import { MarketResponse, RosterPlayer, RosterResponse } from '../api/types';
 import { Card } from '../components/Card';
-import { Pill } from '../components/Pill';
+import { Pill, pillColor, pillLabel } from '../components/Pill';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
 import { useUserTeamId } from '../state/userTeam';
@@ -50,7 +50,6 @@ export const TeamScreen: React.FC = () => {
   const [selectedPlayer, setSelectedPlayer] = React.useState<RosterPlayer | null>(null);
   const [selectedCoach, setSelectedCoach] = React.useState<Coach | null>(null);
   const [unit, setUnit] = React.useState<Unit>('offense');
-  const [healMessage, setHealMessage] = React.useState<string | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['roster', userTeamId],
@@ -72,16 +71,6 @@ export const TeamScreen: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['dashboard', userTeamId] });
       setSelectedPlayer(null);
     },
-  });
-
-  const heal = useMutation({
-    mutationFn: (playerId: string) => api.healPlayer(userTeamId!, playerId),
-    onSuccess: (res) => {
-      setHealMessage(`${res.player.name} → ${injuryLabel(res.player.status)}`);
-      queryClient.invalidateQueries({ queryKey: ['roster', userTeamId] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', userTeamId] });
-    },
-    onError: (err) => setHealMessage(err instanceof Error ? err.message : 'Heal failed'),
   });
 
   const saveDepth = useMutation({
@@ -168,6 +157,10 @@ export const TeamScreen: React.FC = () => {
       <View>
         <Text style={typography.label}>Roster</Text>
         <Text style={[typography.display, styles.title]}>{data.team.name}</Text>
+        <View style={styles.identityRow}>
+          <Pill label={pillLabel(data.team.identity.offense)} color={pillColor(data.team.identity.offense)} />
+          <Pill label={pillLabel(data.team.identity.defense)} color={pillColor(data.team.identity.defense)} />
+        </View>
       </View>
 
       {data.team.coaches.length > 0 && (
@@ -292,14 +285,10 @@ export const TeamScreen: React.FC = () => {
         player={selectedPlayer}
         subOptions={subOptions}
         topMarketListing={topMarketListing}
-        healAction={data.team.healAction}
-        healMessage={selectedPlayer ? healMessage : null}
-        healing={heal.isPending}
         buying={buyListing.isPending}
-        onHeal={(playerId) => heal.mutate(playerId)}
         onSub={swapPlayers}
         onBuyMarket={(listingId) => buyListing.mutate(listingId)}
-        onClose={() => { setSelectedPlayer(null); setHealMessage(null); }}
+        onClose={() => setSelectedPlayer(null)}
       />
       <CoachProfile coach={selectedCoach} onClose={() => setSelectedCoach(null)} />
     </ScreenContainer>
@@ -400,17 +389,6 @@ function StarterCard({
       </View>
       <Text style={styles.cardName} numberOfLines={1}>{player?.name.split(' ').slice(-1)[0] ?? 'Empty'}</Text>
       <Text style={styles.cardArchetype} numberOfLines={1}>{player?.archetype ?? 'No player'}</Text>
-      {player && (
-        <View style={styles.cardFooter}>
-          <MoraleDot morale={player.morale} />
-          {player.injury.status !== 'HEALTHY' && (
-            <InjuryCross />
-          )}
-          <View style={styles.cardFatigue}>
-            <FatigueBar fatigue={player.fatigue} />
-          </View>
-        </View>
-      )}
     </Pressable>
   );
 }
@@ -442,16 +420,6 @@ function PlayerRow({
           <Text style={styles.overall}>{player.overall}</Text>
         </View>
         <Text style={typography.caption} numberOfLines={1}>{player.archetype}</Text>
-        <View style={styles.statusRow}>
-          <MoraleDot morale={player.morale} />
-          {player.injury.status !== 'HEALTHY' && (
-            <Text style={[styles.riskText, { color: injuryColor(player.injury.status) }]}>
-              + 
-              {injuryLabel(player.injury.status)}
-            </Text>
-          )}
-          <FatigueBar fatigue={player.fatigue} />
-        </View>
       </View>
     </Pressable>
   );
@@ -461,11 +429,7 @@ function PlayerProfile({
   player,
   subOptions,
   topMarketListing,
-  healAction,
-  healMessage,
-  healing,
   buying,
-  onHeal,
   onSub,
   onBuyMarket,
   onClose,
@@ -473,25 +437,18 @@ function PlayerProfile({
   player: RosterPlayer | null;
   subOptions: RosterPlayer[];
   topMarketListing?: MarketResponse['listings'][0] | null;
-  healAction: StaffActionEntry;
-  healMessage: string | null;
-  healing: boolean;
   buying: boolean;
-  onHeal: (playerId: string) => void;
   onSub: (playerA: RosterPlayer, playerB: RosterPlayer) => void;
   onBuyMarket: (listingId: string) => void;
   onClose: () => void;
 }) {
   const [showSub, setShowSub] = React.useState(false);
-  
+
   React.useEffect(() => {
     setShowSub(false);
   }, [player]);
 
   if (!player) return null;
-
-  const isInjured = player.injury.status !== 'HEALTHY';
-  const canHeal = isInjured && healAction.available;
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -545,8 +502,8 @@ function PlayerProfile({
                           <Text style={typography.body}>{topMarketListing.player.name}</Text>
                           <Text style={typography.caption}>{topMarketListing.player.overall} OVR - {topMarketListing.player.age} yrs</Text>
                         </View>
-                        <Pressable 
-                          style={[styles.buyButton, (!topMarketListing.canBuy || buying) && styles.healButtonDisabled]}
+                        <Pressable
+                          style={[styles.buyButton, (!topMarketListing.canBuy || buying) && styles.buyButtonDisabled]}
                           disabled={!topMarketListing.canBuy || buying}
                           onPress={() => onBuyMarket(topMarketListing.id)}
                         >
@@ -562,37 +519,6 @@ function PlayerProfile({
             </ScrollView>
           ) : (
             <ScrollView contentContainerStyle={{ gap: spacing.lg }} showsVerticalScrollIndicator={false}>
-              {isInjured && (
-                <View style={styles.profileSection}>
-                  <SectionLabel>Medical</SectionLabel>
-                  <View style={styles.healBlock}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[typography.body, { color: injuryColor(player.injury.status), fontWeight: '700' }]}>
-                        {injuryLabel(player.injury.status)}
-                        {player.injury.weeks > 0 ? ` / ${player.injury.weeks} wk` : ''}
-                      </Text>
-                      {player.injury.type && (
-                        <Text style={typography.caption}>{player.injury.type}</Text>
-                      )}
-                    </View>
-                    <Pressable
-                      disabled={!canHeal || healing}
-                      onPress={() => onHeal(player.id)}
-                      style={[styles.healButton, (!canHeal || healing) && styles.healButtonDisabled]}
-                    >
-                      <Text style={styles.healButtonText}>
-                        {healing ? '...' : canHeal ? `Heal ${formatSalary(healAction.cost)}` : healAction.reason ?? 'Unavailable'}
-                      </Text>
-                    </Pressable>
-                  </View>
-                  {healMessage && (
-                    <Text style={[typography.caption, { color: colors.accent.primary, marginTop: spacing.xs }]} numberOfLines={2}>
-                      {healMessage}
-                    </Text>
-                  )}
-                </View>
-              )}
-
               <View style={styles.profileSection}>
                 <SectionLabel>Scheme Fit</SectionLabel>
                 <Pill label={player.schemeFit.label} color={schemeFitColor(player.schemeFit.label)} />
@@ -606,20 +532,7 @@ function PlayerProfile({
                 ))}
               </View>
 
-              <View style={styles.profileSection}>
-                <SectionLabel>Personality</SectionLabel>
-                <View style={styles.traitWrap}>
-                  {player.traits.map((trait) => (
-                    <View key={trait} style={styles.trait}>
-                      <Text style={styles.traitText}>{trait}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-
               <View style={styles.statusGrid}>
-                <StatusTile label="Morale" value={player.morale} tone={moraleColor(player.morale)} />
-                <StatusTile label="Fatigue" value={player.fatigue} tone={fatigueColor(player.fatigue)} />
                 <StatusTile label="Contract" value={`${player.contract.yearsLeft}y`} tone={colors.text.primary} />
                 <StatusTile label="OVR" value={player.overall} tone={colors.accent.primary} />
                 <StatusTile label="Salary" value={formatSalary(player.contract.salary)} tone={colors.text.primary} />
@@ -693,9 +606,7 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
           <View style={styles.statusGrid}>
             <StatusTile label="Reputation" value={coach.reputation} tone={colors.accent.primary} />
             <StatusTile label="Hot Seat" value={coach.hotSeat} tone={hotSeatColor(coach.hotSeat)} />
-            <StatusTile label="Tempo" value={coach.preferredTempo} tone={colors.text.primary} />
             <StatusTile label="Aggression" value={coach.aggression} tone={colors.text.primary} />
-            <StatusTile label="Morale" value={coach.moraleImpact >= 0 ? `+${coach.moraleImpact}` : `${coach.moraleImpact}`} tone={coach.moraleImpact >= 0 ? colors.success : colors.warn} />
             <StatusTile label="Tenure" value={`${coach.yearsWithTeam}y`} tone={colors.text.primary} />
           </View>
         </View>
@@ -705,9 +616,6 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
 }
 
 function coachStoryLine(coach: Coach): string {
-  if (coach.role === 'TRAINER') return `Develops ${coach.developmentSpecialty} talent and lifts ceilings on younger players.`;
-  if (coach.role === 'MEDICAL') return `${coach.developmentSpecialty} focus — keeps the roster healthier through the grind.`;
-  if (coach.role === 'RECRUITMENT') return `${coach.developmentSpecialty} pipeline — finds new talent before rivals do.`;
   if (coach.role === 'OC') return `${coach.philosophy} on offense — defines how the team attacks.`;
   if (coach.role === 'DC') return `${coach.philosophy} on defense — sets the tone for the front seven and back end.`;
   return `${coach.philosophy} — the program's anchor identity.`;
@@ -734,56 +642,10 @@ function StatusTile({ label, value, tone }: { label: string; value: string | num
   );
 }
 
-function MoraleDot({ morale }: { morale: number }) {
-  return <View style={[styles.moraleDot, { backgroundColor: moraleColor(morale) }]} />;
-}
-
-function FatigueBar({ fatigue }: { fatigue: number }) {
-  return (
-    <View style={styles.fatigueTrack}>
-      <View style={[styles.fatigueFill, { width: `${Math.max(4, fatigue)}%`, backgroundColor: fatigueColor(fatigue) }]} />
-    </View>
-  );
-}
-
-function InjuryCross() {
-  return (
-    <View style={styles.injuryCross}>
-      <Text style={styles.injuryCrossText}>+</Text>
-    </View>
-  );
-}
-
-function moraleColor(morale: number): string {
-  if (morale >= 75) return colors.success;
-  if (morale >= 55) return colors.warn;
-  return colors.danger;
-}
-
-function fatigueColor(fatigue: number): string {
-  if (fatigue >= 70) return colors.danger;
-  if (fatigue >= 45) return colors.warn;
-  return colors.success;
-}
-
 function schemeFitColor(fit: RosterPlayer['schemeFit']['label']): string {
   if (fit === 'Excellent Fit') return colors.success;
   if (fit === 'Solid Fit') return colors.accent.primary;
   return colors.warn;
-}
-
-function injuryColor(status: string): string {
-  if (status === 'MULTI_WEEK') return colors.danger;
-  if (status === 'MINOR') return colors.warn;
-  if (status === 'QUESTIONABLE') return colors.identity.fast;
-  return colors.success;
-}
-
-function injuryLabel(status: string): string {
-  if (status === 'MULTI_WEEK') return 'Out';
-  if (status === 'MINOR') return 'Minor';
-  if (status === 'QUESTIONABLE') return 'Questionable';
-  return 'Healthy';
 }
 
 function hotSeatColor(value: number): string {
@@ -794,15 +656,10 @@ function hotSeatColor(value: number): string {
 
 function coachRoleShort(role: string): string {
   if (role === 'HEAD_COACH') return 'HC';
-  if (role === 'TRAINER') return 'TRN';
-  if (role === 'MEDICAL') return 'MED';
-  if (role === 'RECRUITMENT') return 'REC';
   return role;
 }
 
-function coachSpecialtyLabel(role: string, specialty: string): string {
-  if (role === 'MEDICAL') return `${specialty} medical`;
-  if (role === 'RECRUITMENT') return `${specialty} scouting`;
+function coachSpecialtyLabel(_role: string, specialty: string): string {
   return `${specialty} dev`;
 }
 
@@ -881,36 +738,6 @@ const styles = StyleSheet.create({
   },
   philosophyTextActive: {
     color: colors.bg.base,
-  },
-  injuryRow: {
-    minHeight:       64,
-    padding:         spacing.md,
-    flexDirection:   'row',
-    alignItems:      'center',
-    gap:             spacing.md,
-  },
-  injuryStatusDot: {
-    width:        10,
-    height:       10,
-    borderRadius: 5,
-  },
-  injuryText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  injuryCross: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  injuryCrossText: {
-    color: colors.text.primary,
-    fontSize: 13,
-    lineHeight: 14,
-    fontWeight: '900',
   },
   staffGrid: {
     flexDirection: 'row',
@@ -1071,22 +898,6 @@ const styles = StyleSheet.create({
     width:     '100%',
     textAlign: 'center',
   },
-  cardFooter: {
-    width:          '100%',
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'center',
-    gap:            spacing.xs,
-    marginTop:      'auto',
-  },
-  cardRiskDot: {
-    width:        7,
-    height:       7,
-    borderRadius: 4,
-  },
-  cardFatigue: {
-    flex: 1,
-  },
   playerRow: {
     minHeight:       78,
     flexDirection:   'row',
@@ -1136,32 +947,6 @@ const styles = StyleSheet.create({
   overall: {
     ...typography.heading,
     color: colors.accent.primary,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing.sm,
-    marginTop:     spacing.xs,
-  },
-  riskText: {
-    fontSize:   10,
-    fontWeight: '800',
-  },
-  moraleDot: {
-    width:        8,
-    height:       8,
-    borderRadius: 4,
-  },
-  fatigueTrack: {
-    flex:            1,
-    height:          6,
-    borderRadius:    radius.pill,
-    backgroundColor: colors.bg.surface,
-    overflow:        'hidden',
-  },
-  fatigueFill: {
-    height:       '100%',
-    borderRadius: radius.pill,
   },
   modalBackdrop: {
     flex:            1,
@@ -1263,31 +1048,9 @@ const styles = StyleSheet.create({
   fitDetail: {
     marginTop: spacing.xs,
   },
-  healBlock: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            spacing.md,
-    backgroundColor: colors.bg.surface,
-    padding:         spacing.md,
-    borderRadius:    radius.md,
-  },
-  healButton: {
-    minHeight:       40,
-    minWidth:        110,
-    borderRadius:    radius.sm,
-    backgroundColor: colors.accent.primary,
-    alignItems:      'center',
-    justifyContent:  'center',
-    paddingHorizontal: spacing.md,
-  },
-  healButtonDisabled: {
+  buyButtonDisabled: {
     backgroundColor: colors.bg.elevated,
     opacity: 0.7,
-  },
-  healButtonText: {
-    ...typography.label,
-    color: colors.bg.base,
-    fontWeight: '800',
   },
   attributeRow: {
     flexDirection: 'row',
@@ -1317,22 +1080,6 @@ const styles = StyleSheet.create({
     textAlign:  'right',
     color:      colors.text.primary,
     fontWeight: '700',
-  },
-  traitWrap: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
-    gap:           spacing.sm,
-  },
-  trait: {
-    borderRadius:      radius.pill,
-    paddingVertical:   spacing.xs,
-    paddingHorizontal: spacing.md,
-    backgroundColor:   colors.bg.surface,
-  },
-  traitText: {
-    ...typography.caption,
-    color:      colors.text.primary,
-    fontWeight: '600',
   },
   statusGrid: {
     flexDirection: 'row',

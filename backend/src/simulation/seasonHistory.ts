@@ -100,7 +100,7 @@ async function nextSeasonNumber(): Promise<number> {
 
 function chooseMvp(
   standings: TeamRecord[],
-  teams: Array<{ id: string; name: string; players: Array<{ id: string; name: string; position: string; overall: number; potential: number; age: number; fatigue: number; injuryStatus: string }> }>,
+  teams: Array<{ id: string; name: string; players: Array<{ id: string; name: string; position: string; overall: number; potential: number; age: number }> }>,
 ) {
   const rankByTeam = new Map(standings.map((row, index) => [row.teamId, index + 1]));
   const candidates = teams.flatMap((team) =>
@@ -111,9 +111,7 @@ function chooseMvp(
       score: player.overall * 1.8 +
         Math.max(0, player.potential - player.overall) * 0.35 +
         (player.position === 'QB' ? 8 : ['WR', 'RB', 'DE', 'CB'].includes(player.position) ? 4 : 0) +
-        (9 - (rankByTeam.get(team.id) ?? 8)) * 2 -
-        player.fatigue * 0.05 -
-        (player.injuryStatus === 'HEALTHY' ? 0 : 6),
+        (9 - (rankByTeam.get(team.id) ?? 8)) * 2,
     }))
   );
   return candidates.sort((a, b) => b.score - a.score)[0] ?? null;

@@ -37,8 +37,6 @@ export interface LeaguePlayoffBracket {
   championTeamName: string | null;
 }
 
-const MORALE_SWING = 5;
-
 interface SeededTeam {
   rank: number;
   teamId: string;
@@ -66,11 +64,6 @@ interface TeamLike {
     overall: number;
     potential: number;
     age: number;
-    morale: number;
-    fatigue: number;
-    injuryStatus: string;
-    injuryType: string | null;
-    injuryWeeks: number;
   }>;
 }
 
@@ -176,7 +169,6 @@ async function playPlayoffMatch(
   });
 
   const winnerTeamId = homeScore > awayScore ? home.teamId : away.teamId;
-  await applyPlayoffMorale(home.teamId, away.teamId, homeScore, awayScore);
 
   return {
     matchId:      match.id,
@@ -191,20 +183,4 @@ async function playPlayoffMatch(
     awayScore,
     winnerTeamId,
   };
-}
-
-async function applyPlayoffMorale(homeId: string, awayId: string, homeScore: number, awayScore: number): Promise<void> {
-  const homeDelta = homeScore > awayScore ? +MORALE_SWING : -MORALE_SWING;
-  const awayDelta = -homeDelta;
-  const teams = await prisma.team.findMany({
-    where: { id: { in: [homeId, awayId] } },
-    select: { id: true, morale: true },
-  });
-  for (const t of teams) {
-    const delta = t.id === homeId ? homeDelta : awayDelta;
-    await prisma.team.update({
-      where: { id: t.id },
-      data: { morale: Math.max(0, Math.min(100, t.morale + delta)) },
-    });
-  }
 }

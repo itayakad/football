@@ -19,12 +19,6 @@ enum DefenseStyle {
   PREVENT
 }
 
-enum Tempo {
-  SLOW
-  NORMAL
-  FAST
-}
-
 enum OffensivePhilosophy {
   WEST_COAST
   VERTICAL_SPREAD
@@ -52,18 +46,11 @@ model Team {
   offenseStyle  OffenseStyle @default(BALANCED)
   offensivePhilosophy OffensivePhilosophy @default(WEST_COAST)
   defenseStyle  DefenseStyle @default(BALANCED)
-  tempo         Tempo        @default(NORMAL)
   // Team's 9-play loadouts. Identity is determined entirely by these picks.
   // Stored as Json arrays of play IDs; backend validates against playLibrary.
   offensivePlays Json?
   defensivePlays Json?
   money         Int          @default(150000000)
-  morale        Int          @default(70)
-  // Per-week cooldowns for staff actions. Stores the week number the action
-  // was last used; rebuildSchedule resets all to 0 between seasons.
-  trainWeek     Int          @default(0)
-  healWeek      Int          @default(0)
-  recruitWeek   Int          @default(0)
   players       Player[]
   coaches       Coach[]
   schemes       TeamScheme[]
@@ -96,14 +83,11 @@ model Coach {
   philosophy            String
   developmentSpecialty  String
   aggression            Int
-  moraleImpact          Int
-  preferredTempo        Tempo
   reputation            Int
   // Coach OVRs used by the play-driven engine.
   //   - HEAD_COACH: overall (general); offenseRating + defenseRating drive
   //     the offensive/defensive playcalling RNG buckets respectively.
   //   - OC / DC: overall is a play-strength multiplier in the engine.
-  //   - Other roles: unused at sim time.
   overall               Int      @default(60)
   offenseRating         Int      @default(60)
   defenseRating         Int      @default(60)
@@ -124,14 +108,6 @@ model Player {
   overall            Int
   potential          Int
   age                Int
-  morale             Int     @default(70)
-  fatigue            Int     @default(0)
-  // Weeks of conditioning buff remaining. While > 0, post-match injury chance
-  // is multiplied by ~0.4. Decrements by 1 each match week.
-  conditioning       Int     @default(0)
-  injuryStatus       String  @default("HEALTHY")
-  injuryType         String?
-  injuryWeeks        Int     @default(0)
   depthOrder         Int     @default(0)
   salary             Int     @default(2500000)
   contractYearsLeft  Int     @default(2)
@@ -259,7 +235,7 @@ model Match {
   // null for regular season; "WILD_CARD" | "SEMI" | "FINAL" for playoffs.
   playoffRound String?
   // Per-match tactical gameplans for each side. Set by AI coach pre-match,
-  // overridable by user for their team. Shape: { offensiveConcepts, defensiveCounters, tempoOverride }.
+  // overridable by user for their team. Shape: { offensivePlays, defensivePlays }.
   homeGameplan Json?
   awayGameplan Json?
 }

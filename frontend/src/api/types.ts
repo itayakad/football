@@ -3,7 +3,13 @@
 
 export type OffenseStyle  = 'RUN_HEAVY'  | 'BALANCED' | 'PASS_HEAVY';
 export type DefenseStyle  = 'AGGRESSIVE' | 'BALANCED' | 'PREVENT';
-export type Tempo         = 'SLOW'       | 'NORMAL'   | 'FAST';
+export type OffensiveIdentity = 'VERTICAL' | 'RUN_HEAVY' | 'PASS_HEAVY' | 'BALANCED';
+export type DefensiveIdentity = 'PRESSURE' | 'MAN_HEAVY' | 'ZONE_HEAVY' | 'BALANCED';
+
+export interface TeamIdentity {
+  offense: OffensiveIdentity;
+  defense: DefensiveIdentity;
+}
 
 export type OffensivePhilosophy =
   | 'WEST_COAST'
@@ -60,20 +66,6 @@ export interface TeamScheme {
   isDefault: boolean;
 }
 
-export interface LineupBlocker {
-  playerId: string;
-  name: string;
-  position: string;
-  status: string;
-  message: string;
-}
-
-export interface LineupReadiness {
-  blocked: boolean;
-  blockers: LineupBlocker[];
-  warnings: LineupBlocker[];
-}
-
 export interface Gameplan {
   offensivePlays: string[];
   defensivePlays: string[];
@@ -103,13 +95,10 @@ export interface DashboardResponse {
   team: {
     id:            string;
     name:          string;
-    offenseStyle:  OffenseStyle;
+    identity:      TeamIdentity;
     offensivePhilosophy: OffensivePhilosophy;
-    defenseStyle:  DefenseStyle;
-    tempo:         Tempo;
     offenseRating: number;
     defenseRating: number;
-    morale:        number;
     leagueName:    string;
     leagueTier:    number;
   };
@@ -120,10 +109,7 @@ export interface DashboardResponse {
     opponent: {
       id:           string;
       name:         string;
-      offenseStyle: OffenseStyle;
-      defenseStyle: DefenseStyle;
-      tempo:        Tempo;
-      morale:       number;
+      identity:     TeamIdentity;
     };
   } | null;
   recentResult: {
@@ -143,54 +129,6 @@ export interface DashboardResponse {
   };
   recentForm: RecentForm;
   news:       NewsItem[];
-  staffActions: StaffActionsState;
-  lineupReadiness: LineupReadiness;
-}
-
-export interface StaffActionEntry {
-  available:    boolean;
-  reason:       string | null;
-  cost:         number;
-  usedThisWeek: boolean;
-  specialty:    string | null;
-}
-
-export interface StaffActionsState {
-  currentWeek: number | null;
-  train:       StaffActionEntry;
-  recruit:     StaffActionEntry;
-}
-
-export type TrainMode = 'STRENGTH' | 'CONDITIONING';
-
-export type TrainResponse =
-  | {
-      ok:             true;
-      mode:           'STRENGTH';
-      cost:           number;
-      player:         { id: string; name: string; position: string; overall: number; delta: number };
-      atPotential:    boolean;
-      specialtyMatch: boolean;
-    }
-  | {
-      ok:             true;
-      mode:           'CONDITIONING';
-      cost:           number;
-      player:         { id: string; name: string; position: string; conditioning: number; weeksAdded: number };
-      specialtyMatch: boolean;
-    };
-
-export interface HealResponse {
-  ok:     true;
-  cost:   number;
-  player: { id: string; name: string; position: string; status: string; weeks: number };
-}
-
-export interface RecruitResponse {
-  ok:        true;
-  cost:      number;
-  specialty: string;
-  listings:  Array<{ id: string; name: string; position: string; overall: number; age: number; teamName: string }>;
 }
 
 export interface PositionGroups {
@@ -220,27 +158,21 @@ export interface MatchPreviewResponse {
   myTeam: {
     id:            string;
     name:          string;
-    offenseStyle:  OffenseStyle;
+    identity:      TeamIdentity;
     offensivePhilosophy: OffensivePhilosophy;
-    defenseStyle:  DefenseStyle;
-    tempo:         Tempo;
     offenseRating: number;
     defenseRating: number;
   };
   opponent: {
     id:            string;
     name:          string;
-    offenseStyle:  OffenseStyle;
+    identity:      TeamIdentity;
     offensivePhilosophy: OffensivePhilosophy;
-    defenseStyle:  DefenseStyle;
-    tempo:         Tempo;
     offenseRating: number;
     defenseRating: number;
-    morale:        number;
     groups:        PositionGroups;
   };
   recommendation: CoachRecommendation;
-  lineupReadiness: LineupReadiness;
   schemes: TeamScheme[];
   playTemplates: {
     offense: PlayTemplate[];
@@ -263,9 +195,7 @@ export interface LeagueStandingsResponse {
     pointsFor:     number;
     pointsAgainst: number;
     diff:          number;
-    offenseStyle:  OffenseStyle;
-    defenseStyle:  DefenseStyle;
-    tempo:         Tempo;
+    identity:      TeamIdentity;
     coaches: Array<{
       id:         string;
       name:       string;
@@ -290,23 +220,14 @@ export interface RosterPlayer {
   overall:       number;
   potential:     number;
   age:           number;
-  morale:        number;
-  fatigue:       number;
-  conditioning:  number;
   depthOrder:    number;
   archetype:     string;
-  traits:        string[];
   attributes:    Record<string, number>;
   yearsWithClub: number;
   contract: {
     yearsLeft:          number;
     salary:             number;
     extensionEligible:  boolean;
-  };
-  injury: {
-    status: 'HEALTHY' | 'QUESTIONABLE' | 'MINOR' | 'MULTI_WEEK';
-    type:   string | null;
-    weeks:  number;
   };
   schemeFit: {
     label:  'Excellent Fit' | 'Solid Fit' | 'Development Fit';
@@ -320,24 +241,17 @@ export interface RosterResponse {
     name:          string;
     offenseRating: number;
     defenseRating: number;
-    morale:        number;
-    offenseStyle:  OffenseStyle;
+    identity:      TeamIdentity;
     offensivePhilosophy: OffensivePhilosophy;
-    defenseStyle:  DefenseStyle;
-    tempo:         Tempo;
     salaryCap:     number;
     salaryUsed:    number;
-    injuries:      number;
-    healAction:    StaffActionEntry;
     coaches: Array<{
       id:                   string;
       name:                 string;
-      role:                 'HEAD_COACH' | 'OC' | 'DC' | 'TRAINER' | 'MEDICAL' | 'RECRUITMENT';
+      role:                 'HEAD_COACH' | 'OC' | 'DC';
       philosophy:           string;
       developmentSpecialty: string;
       aggression:           number;
-      moraleImpact:         number;
-      preferredTempo:       Tempo;
       reputation:           number;
       careerWins:           number;
       careerLosses:         number;
@@ -347,15 +261,6 @@ export interface RosterResponse {
       age:                  number;
     }>;
   };
-  injuryReport: Array<{
-    playerId: string;
-    name:     string;
-    position: string;
-    status:   'QUESTIONABLE' | 'MINOR' | 'MULTI_WEEK';
-    type:     string | null;
-    weeks:    number;
-  }>;
-  lineupReadiness: LineupReadiness;
   schemes: TeamScheme[];
   playTemplates: {
     offense: PlayTemplate[];
@@ -380,8 +285,6 @@ export interface CoachMarketResponse {
     philosophy:           string;
     developmentSpecialty: string;
     aggression:           number;
-    moraleImpact:         number;
-    preferredTempo:       Tempo;
     reputation:           number;
     careerWins:           number;
     careerLosses:         number;
@@ -402,8 +305,6 @@ export interface MarketPlayer {
   overall:   number;
   potential: number;
   age:       number;
-  morale:    number;
-  fatigue:   number;
   archetype: string;
   value:     number;
   story:     string;
@@ -411,11 +312,6 @@ export interface MarketPlayer {
     yearsLeft:         number;
     salary:            number;
     extensionEligible: boolean;
-  };
-  injury: {
-    status: 'HEALTHY' | 'QUESTIONABLE' | 'MINOR' | 'MULTI_WEEK';
-    type:   string | null;
-    weeks:  number;
   };
 }
 
@@ -434,9 +330,7 @@ export interface MarketResponse {
     sellerTeam: {
       id:           string;
       name:         string;
-      offenseStyle: OffenseStyle;
-      defenseStyle: DefenseStyle;
-      tempo:        Tempo;
+      identity:     TeamIdentity;
     };
     player: MarketPlayer;
     canBuy: boolean;
@@ -447,9 +341,7 @@ export interface MarketResponse {
     buyerTeam: {
       id:           string;
       name:         string;
-      offenseStyle: OffenseStyle;
-      defenseStyle: DefenseStyle;
-      tempo:        Tempo;
+      identity:     TeamIdentity;
     };
     player: MarketPlayer;
   }>;
@@ -582,13 +474,18 @@ export interface OffseasonResponse {
 
 export interface FeedEvent {
   quarter:   number;
+  clock:     string;
   text:      string;
+  detail?:   string;
   homeScore: number;
   awayScore: number;
   type:      'KICKOFF' | 'SCORE' | 'TURNOVER' | 'PUNT' | 'PLAY' | 'HALFTIME' | 'FINAL';
   points?:   number;
   scoringTeam?: 'home' | 'away';
   possessionTeam?: 'home' | 'away';
+  down?: number;
+  distance?: number;
+  yardLine?: number;
 }
 
 export interface SimulateResponse {
@@ -603,7 +500,5 @@ export interface SimulateResponse {
   keyMatchup:    string;
   quarterScores: Array<[number, number]>;
   events:        FeedEvent[];
-  moraleChange:  { home: number; away: number };
-  injuryReport:  Array<{ playerId: string; playerName: string; teamId: string; status: string; type: string | null; weeks: number }>;
   seasonAdvance: OffseasonResponse | null;
 }

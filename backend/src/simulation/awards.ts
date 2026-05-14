@@ -36,8 +36,6 @@ interface ScoredPlayer {
     overall: number;
     potential: number;
     age: number;
-    fatigue: number;
-    injuryStatus: string;
   };
   teamName: string;
   teamRank: number;
@@ -84,7 +82,7 @@ export async function computeLeagueAwards(season: number, leagueId: string): Pro
 }
 
 function scorePlayer(
-  player: { overall: number; potential: number; position: string; fatigue: number; injuryStatus: string },
+  player: { overall: number; potential: number; position: string },
   teamRank: number,
   totalTeams: number,
 ): number {
@@ -94,8 +92,7 @@ function scorePlayer(
     0;
   const teamBonus = (totalTeams + 1 - teamRank) * 2;
   const upside = Math.max(0, player.potential - player.overall) * 0.35;
-  const injuryPenalty = player.injuryStatus === 'HEALTHY' ? 0 : 6;
-  return player.overall * 1.8 + upside + positionalBoost + teamBonus - player.fatigue * 0.05 - injuryPenalty;
+  return player.overall * 1.8 + upside + positionalBoost + teamBonus;
 }
 
 function pickTop(scored: ScoredPlayer[], filter: (p: ScoredPlayer) => boolean): PlayerAward | null {

@@ -89,10 +89,9 @@ export const MatchPreviewScreen: React.FC = () => {
       <Card>
         <SectionLabel>Opponent Breakdown</SectionLabel>
         <View style={styles.identityRow}>
-          <Pill label={pillLabel(opponent.offenseStyle)} color={pillColor(opponent.offenseStyle)} />
+          <Pill label={pillLabel(opponent.identity.offense)} color={pillColor(opponent.identity.offense)} />
           <Pill label={pillLabel(opponent.offensivePhilosophy)} color={pillColor(opponent.offensivePhilosophy)} />
-          <Pill label={pillLabel(opponent.defenseStyle)} color={pillColor(opponent.defenseStyle)} />
-          <Pill label={pillLabel(opponent.tempo)}        color={pillColor(opponent.tempo)} />
+          <Pill label={pillLabel(opponent.identity.defense)} color={pillColor(opponent.identity.defense)} />
         </View>
 
         <View style={styles.groupGrid}>
@@ -103,15 +102,6 @@ export const MatchPreviewScreen: React.FC = () => {
           <GroupStat label="Secondary" value={opponent.groups.secondary} />
         </View>
       </Card>
-
-      {data.lineupReadiness.warnings.length > 0 && (
-        <Card>
-          <SectionLabel>Injury Risk</SectionLabel>
-          {data.lineupReadiness.warnings.map((warning) => (
-            <Text key={warning.playerId} style={[typography.caption, { color: colors.warn, marginTop: spacing.xs }]}>{warning.message}</Text>
-          ))}
-        </Card>
-      )}
 
       <Card>
         <SectionLabel>Weekly Schemes</SectionLabel>

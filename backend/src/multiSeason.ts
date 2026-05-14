@@ -12,7 +12,6 @@ interface TeamSeasonStats {
   tier: number;
   offenseStyle: string;
   defenseStyle: string;
-  tempo: string;
   wins: number;
   losses: number;
   ties: number;
@@ -48,7 +47,7 @@ async function runSeason(seasonNum: number): Promise<SeasonAgg> {
 
   // Pull team metadata so we can attach style/tier to each standing row
   const teams = await prisma.team.findMany({
-    select: { id: true, name: true, offenseStyle: true, defenseStyle: true, tempo: true, leagueId: true },
+    select: { id: true, name: true, offenseStyle: true, defenseStyle: true, leagueId: true },
   });
   const teamById = new Map(teams.map((t) => [t.id, t]));
   const leagues = await prisma.league.findMany();
@@ -70,7 +69,6 @@ async function runSeason(seasonNum: number): Promise<SeasonAgg> {
         tier: tierByLeague.get(team.leagueId) ?? 0,
         offenseStyle: team.offenseStyle,
         defenseStyle: team.defenseStyle,
-        tempo: team.tempo,
         wins: standing.wins,
         losses: standing.losses,
         ties: standing.ties,

@@ -181,7 +181,7 @@ const TEMPLATES: Record<string, Record<string, ScenarioFn>> = {
         summary:
           `${winner} leaned on the run game and wore ${loser} down in a ${scoreStr} victory. ` +
           `${rb ? `${lastName(rb.name)} was the engine all day` : 'The rushing attack was the engine'}, ` +
-          `with the offense controlling tempo and field position from the second quarter on.`,
+          `with the offense controlling field position from the second quarter on.`,
       };
     },
     BALANCED: ({ winner, loser, scoreStr, winDefStyle }) => {
@@ -198,7 +198,7 @@ const TEMPLATES: Record<string, Record<string, ScenarioFn>> = {
           keyMatchup: 'Ball control + prevention',
           summary:
             `${winner} managed the game effectively in a ${scoreStr} win over ${loser}. ` +
-            `The offense controlled tempo while the prevent defense took away the explosive plays ${loser} needed to get back in it.`,
+            `The offense controlled field position while the prevent defense took away the explosive plays ${loser} needed to get back in it.`,
         };
       }
       return {

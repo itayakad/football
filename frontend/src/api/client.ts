@@ -2,7 +2,7 @@ import {
   MeResponse, DashboardResponse, MatchPreviewResponse, SimulateResponse, Gameplan,
   LeagueStandingsResponse, RosterResponse, MarketResponse, HistoryResponse,
   OffseasonResponse, CoachMarketResponse,
-  TrainMode, TrainResponse, HealResponse, RecruitResponse, OffensivePhilosophy,
+  OffensivePhilosophy,
   SchemeUnit, TeamScheme,
 } from './types';
 
@@ -130,23 +130,6 @@ export const api = {
 
   history: (teamId: string) =>
     request<HistoryResponse>(`/api/history/${teamId}`),
-
-  trainPlayer: (teamId: string, playerId: string, mode: TrainMode) =>
-    request<TrainResponse>(`/api/team/${teamId}/train`, {
-      method: 'POST',
-      body: JSON.stringify({ playerId, mode }),
-    }),
-
-  healPlayer: (teamId: string, playerId: string) =>
-    request<HealResponse>(`/api/team/${teamId}/heal`, {
-      method: 'POST',
-      body: JSON.stringify({ playerId }),
-    }),
-
-  recruit: (teamId: string) =>
-    request<RecruitResponse>(`/api/team/${teamId}/recruit`, {
-      method: 'POST',
-    }),
 
   finalizeSeason: () =>
     request<{ season: number }>('/api/season/finalize', { method: 'POST' }),

@@ -59,7 +59,7 @@ export const PlayoffBracketScreen: React.FC = () => {
           queryClient.invalidateQueries({ queryKey: ['market'] });
           queryClient.invalidateQueries({ queryKey: ['coachMarket'] });
           navigation.dispatch(
-            CommonActions.reset({ index: 0, routes: [{ name: 'Tabs' }] })
+            CommonActions.reset({ index: 0, routes: [{ name: 'Home' }] })
           );
         }}
         style={styles.next}

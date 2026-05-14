@@ -25,7 +25,6 @@ export interface LeagueResult {
 }
 
 const TOTAL_WEEKS    = 14;
-const MORALE_SWING   = 5;
 
 export async function simulateSeason(): Promise<LeagueResult[]> {
   const leagues = await prisma.league.findMany({
@@ -115,33 +114,6 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
         })
       )
     );
-
-    const moraleDeltas = new Map<string, number>();
-    for (const r of weekResults) {
-      if (r.homeScore > r.awayScore) {
-        moraleDeltas.set(r.homeTeamId, (moraleDeltas.get(r.homeTeamId) ?? 0) + MORALE_SWING);
-        moraleDeltas.set(r.awayTeamId, (moraleDeltas.get(r.awayTeamId) ?? 0) - MORALE_SWING);
-      } else if (r.awayScore > r.homeScore) {
-        moraleDeltas.set(r.awayTeamId, (moraleDeltas.get(r.awayTeamId) ?? 0) + MORALE_SWING);
-        moraleDeltas.set(r.homeTeamId, (moraleDeltas.get(r.homeTeamId) ?? 0) - MORALE_SWING);
-      }
-    }
-
-    if (moraleDeltas.size > 0) {
-      const teamIds = [...moraleDeltas.keys()];
-      const current = await prisma.team.findMany({
-        where:  { id: { in: teamIds } },
-        select: { id: true, morale: true },
-      });
-
-      await Promise.all(
-        current.map((team) => {
-          const delta     = moraleDeltas.get(team.id) ?? 0;
-          const newMorale = Math.max(0, Math.min(100, team.morale + delta));
-          return prisma.team.update({ where: { id: team.id }, data: { morale: newMorale } });
-        })
-      );
-    }
 
     for (const r of weekResults) {
       allMatchResults.push({

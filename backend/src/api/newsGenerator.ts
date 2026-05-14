@@ -23,7 +23,7 @@ const SOURCE_SUFFIXES = ['Guardian', 'Tribune', 'Ledger', 'Herald', 'Post'];
 //   STREAK   — team on a 4+ game win/loss run
 //   STANDINGS— division leader / clear race story
 //   COACH    — hot seats, weak starts, philosophy questions
-//   PLAYER   — frustration, fatigue, contract tension, role pressure
+//   PLAYER   — contract tension, role pressure during losing skids
 //
 export async function generateNewsFeed(limit = 3, leagueId?: string): Promise<NewsItem[]> {
   const leagueFilter = leagueId ? { leagueId } : {};
@@ -249,12 +249,8 @@ async function findPlayerTensionStories(leagueId: string | undefined, currentWee
   const players = await prisma.player.findMany({
     where: {
       team: leagueId ? { leagueId } : undefined,
-      OR: [
-        { morale: { lte: 50 } },
-        { fatigue: { gte: 72 } },
-        { contractYearsLeft: 1, overall: { gte: 78 } },
-        { injuryStatus: { not: 'HEALTHY' } },
-      ],
+      contractYearsLeft: 1,
+      overall: { gte: 78 },
     },
     include: { team: { include: { league: true } } },
   });
@@ -265,28 +261,19 @@ async function findPlayerTensionStories(leagueId: string | undefined, currentWee
     const form = await teamFormSnapshot(player.team.id);
     const losingTeam = form.streakType === 'L' && form.streak >= 2;
     const contractTension = player.contractYearsLeft === 1 && player.overall >= 78;
-    const moraleTension = player.morale <= 50;
-    const fatigueConcern = player.fatigue >= 72;
-    const injuryConcern = player.injuryStatus !== 'HEALTHY';
 
     let headline: string;
     let summary: string;
 
-    if (moraleTension && losingTeam) {
-      headline = `${player.name} frustration grows during ${player.team.name} slide`;
-      summary = `${player.position} morale has dipped to ${player.morale} as ${player.team.name} try to stop a ${form.streak}-game losing run.`;
+    if (losingTeam) {
+      headline = `${player.name} pressed for response as ${player.team.name} skid grows`;
+      summary = `The ${player.position} is under the microscope while ${player.team.name} fight a ${form.streak}-game losing run.`;
     } else if (contractTension) {
       headline = `${player.name} contract watch intensifies`;
       summary = `${player.team.name} have a decision coming on the ${player.overall}-rated ${player.position}, who is entering a final contract year.`;
-    } else if (fatigueConcern) {
-      headline = `${player.team.name} managing heavy workload for ${player.name}`;
-      summary = `${player.name}'s fatigue is up to ${player.fatigue}, making his usage a weekly talking point.`;
-    } else if (injuryConcern) {
-      headline = `${player.name} availability becomes ${player.team.name} concern`;
-      summary = `${player.injuryStatus.toLowerCase().replace('_', ' ')} status has put extra stress on the ${player.position} room.`;
     } else {
       headline = `${player.name} searching for spark at ${player.team.name}`;
-      summary = `${player.position} morale sits at ${player.morale}, and the staff needs a response soon.`;
+      summary = `Coaches want more from the ${player.overall}-rated ${player.position} as ${player.team.name} look to find rhythm.`;
     }
 
     stories.push({
@@ -298,10 +285,7 @@ async function findPlayerTensionStories(leagueId: string | undefined, currentWee
         leagueName: player.team.league.name,
       }, player.team.name, leagueId),
       score:
-        (100 - player.morale) +
-        Math.max(0, player.fatigue - 60) +
         (contractTension ? 24 : 0) +
-        (injuryConcern ? 18 : 0) +
         (losingTeam ? 16 : 0) +
         Math.max(0, player.overall - 75),
     });

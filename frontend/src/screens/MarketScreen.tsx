@@ -224,15 +224,10 @@ export const MarketScreen: React.FC = () => {
 
 function coachRoleShort(role: string): string {
   if (role === 'HEAD_COACH') return 'HC';
-  if (role === 'TRAINER') return 'TRN';
-  if (role === 'MEDICAL') return 'MED';
-  if (role === 'RECRUITMENT') return 'REC';
   return role;
 }
 
-function coachSpecialtyLabel(role: string, specialty: string): string {
-  if (role === 'MEDICAL') return `${specialty} medical`;
-  if (role === 'RECRUITMENT') return `${specialty} scouting`;
+function coachSpecialtyLabel(_role: string, specialty: string): string {
   return `${specialty} dev`;
 }
 
@@ -261,7 +256,8 @@ function MarketCard({
           <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
           <Text style={typography.caption} numberOfLines={1}>{player.archetype} / Age {player.age}</Text>
           <View style={styles.pillRow}>
-            <Pill label={pillLabel(listing.sellerTeam.offenseStyle)} color={pillColor(listing.sellerTeam.offenseStyle)} />
+            <Pill label={pillLabel(listing.sellerTeam.identity.offense)} color={pillColor(listing.sellerTeam.identity.offense)} />
+            <Pill label={pillLabel(listing.sellerTeam.identity.defense)} color={pillColor(listing.sellerTeam.identity.defense)} />
           </View>
         </View>
         <Pressable disabled={disabled} onPress={onAction} style={[styles.actionButton, disabled && styles.disabled]}>
@@ -318,7 +314,7 @@ function Meta({ label, value }: { label: string; value: string }) {
 }
 
 function tradeChipScore(player: RosterPlayer): number {
-  return (player.age >= 31 ? 12 : 0) + (player.contract.yearsLeft === 1 ? 10 : 0) + (player.morale <= 60 ? 6 : 0) + player.overall * 0.1;
+  return (player.age >= 31 ? 12 : 0) + (player.contract.yearsLeft === 1 ? 10 : 0) + player.overall * 0.1;
 }
 
 function formatMoney(value: number): string {

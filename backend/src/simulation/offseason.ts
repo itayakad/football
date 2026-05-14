@@ -37,7 +37,7 @@ interface CoachMove {
   role: string;
   outgoingName: string;
   incomingName: string;
-  reason: 'FIRED' | 'RETIRED' | 'POACHED';
+  reason: 'FIRED' | 'RETIRED';
 }
 
 export interface OffseasonResult {
@@ -180,13 +180,11 @@ async function applyPromotionRelegation(
       data: {
         leagueId: update.leagueId,
         money: { increment: promoted ? 18_000_000 : -12_000_000 },
-        morale: promoted ? { increment: 6 } : { decrement: 8 },
       },
     });
     movements.push(update.movement);
   }
 
-  await clampTeamMorale();
   return movements;
 }
 
@@ -198,8 +196,7 @@ async function applyPlayerLifecycle(season: number): Promise<Retirement[]> {
     const newAge = player.age + 1;
     const shouldRetire =
       newAge >= 37 ||
-      (newAge >= 35 && player.overall < 72) ||
-      (newAge >= 34 && player.injuryStatus === 'MULTI_WEEK');
+      (newAge >= 35 && player.overall < 72);
 
     if (shouldRetire) {
       const story = `${player.name} retired after ${newAge - 21} pro seasons with ${player.team.name}.`;
@@ -227,11 +224,6 @@ async function applyPlayerLifecycle(season: number): Promise<Retirement[]> {
       where: { id: player.id },
       data: {
         age: newAge,
-        fatigue: 0,
-        injuryStatus: 'HEALTHY',
-        injuryType: null,
-        injuryWeeks: 0,
-        morale: Math.round(player.morale * 0.55 + 70 * 0.45),
       },
     });
   }
@@ -248,15 +240,13 @@ async function applyProgressionAndContracts(): Promise<Progression> {
   for (const player of players) {
     const staff = player.team.coaches;
     const specialtyBoost = staff.some((coach) => coach.developmentSpecialty === playerDevelopmentGroup(player.position)) ? 1 : 0;
-    const moraleImpact = Math.round(staff.reduce((sum, coach) => sum + coach.moraleImpact, 0) / Math.max(1, staff.length));
     const growth =
       player.age <= 23 ? 2 :
       player.age <= 26 ? 1 :
       player.age >= 32 ? -2 :
       player.age >= 30 ? -1 :
       0;
-    const moraleNudge = player.morale + moraleImpact >= 78 ? 1 : player.morale + moraleImpact <= 55 ? -1 : 0;
-    const delta = Math.max(-4, Math.min(4, growth + moraleNudge + (player.age <= 26 ? specialtyBoost : 0)));
+    const delta = Math.max(-4, Math.min(4, growth + (player.age <= 26 ? specialtyBoost : 0)));
     const overall = Math.max(35, Math.min(player.potential, player.overall + delta));
     if (overall > player.overall) improved++;
     if (overall < player.overall) declined++;
@@ -335,11 +325,10 @@ async function applyCoachMovement(histories: Array<{ teamId: string; teamName: s
     for (const coach of team.coaches) {
       const shouldRetire = coach.age >= 67 && coach.reputation >= 70;
       const shouldFire = coach.role === 'HEAD_COACH' && coach.hotSeat >= 78;
-      const shouldPoach = coach.role !== 'HEAD_COACH' && coach.reputation >= 76 && history?.resultLabel !== 'Relegation Danger';
-      if (!shouldRetire && !shouldFire && !shouldPoach) continue;
+      if (!shouldRetire && !shouldFire) continue;
 
-      const reason: CoachMove['reason'] = shouldRetire ? 'RETIRED' : shouldFire ? 'FIRED' : 'POACHED';
-      const replacement = buildReplacementCoach(team.id, coach.role, team.offenseStyle, team.defenseStyle, team.tempo);
+      const reason: CoachMove['reason'] = shouldRetire ? 'RETIRED' : 'FIRED';
+      const replacement = buildReplacementCoach(team.id, coach.role, team.offenseStyle, team.defenseStyle);
       await prisma.coach.delete({ where: { id: coach.id } });
       const incoming = await prisma.coach.create({ data: replacement as any });
       moves.push({
@@ -358,7 +347,6 @@ async function applyCoachMovement(histories: Array<{ teamId: string; teamName: s
 async function applyCoachIdentityToTeams(): Promise<void> {
   const teams = await prisma.team.findMany({ include: { coaches: true } });
   for (const team of teams) {
-    const hc = team.coaches.find((coach) => coach.role === 'HEAD_COACH');
     const oc = team.coaches.find((coach) => coach.role === 'OC');
     const dc = team.coaches.find((coach) => coach.role === 'DC');
     const offenseStyle =
@@ -374,7 +362,6 @@ async function applyCoachIdentityToTeams(): Promise<void> {
       data: {
         offenseStyle: offenseStyle as any,
         defenseStyle: defenseStyle as any,
-        tempo: hc?.preferredTempo ?? team.tempo,
       },
     });
   }
@@ -383,7 +370,6 @@ async function applyCoachIdentityToTeams(): Promise<void> {
 async function rebuildSchedule(): Promise<number> {
   await prisma.transferOffer.deleteMany({ where: { listing: { status: { not: 'ACTIVE' } } } });
   await prisma.match.deleteMany();
-  await prisma.team.updateMany({ data: { trainWeek: 0, healWeek: 0, recruitWeek: 0 } });
 
   const leagues = await prisma.league.findMany({
     include: { teams: true },
@@ -410,13 +396,6 @@ async function rebuildSchedule(): Promise<number> {
   return weekCount;
 }
 
-async function clampTeamMorale(): Promise<void> {
-  const teams = await prisma.team.findMany({ select: { id: true, morale: true } });
-  await Promise.all(teams.map((team) =>
-    prisma.team.update({ where: { id: team.id }, data: { morale: Math.max(0, Math.min(100, team.morale)) } })
-  ));
-}
-
 async function createRookie(teamId: string, position: string): Promise<void> {
   const base = ['QB', 'WR', 'CB', 'DE'].includes(position) ? 60 : 57;
   const overall = base + Math.floor(Math.random() * 8);
@@ -428,8 +407,6 @@ async function createRookie(teamId: string, position: string): Promise<void> {
       overall,
       potential,
       age: 21,
-      morale: 70,
-      fatigue: 0,
       salary: Math.round((700_000 + overall * overall * 260) / 100_000) * 100_000,
       contractYearsLeft: 3,
       extensionEligible: false,
@@ -448,18 +425,11 @@ function playerDevelopmentGroup(position: string): string {
   return 'Skill';
 }
 
-function buildReplacementCoach(teamId: string, role: string, offenseStyle: string, defenseStyle: string, tempo: string) {
-  const medicalSpecialties = ['Soft Tissue', 'Orthopedic', 'Recovery'];
-  const recruitmentSpecialties = ['College', 'Pro', 'International'];
+function buildReplacementCoach(teamId: string, role: string, offenseStyle: string, defenseStyle: string) {
   const specialty =
     role === 'OC' ? (offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : 'Skill') :
     role === 'DC' ? (defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? 'DL' : 'LB') :
-    role === 'MEDICAL' ? medicalSpecialties[Math.floor(Math.random() * medicalSpecialties.length)] :
-    role === 'RECRUITMENT' ? recruitmentSpecialties[Math.floor(Math.random() * recruitmentSpecialties.length)] :
     ['QB', 'Skill', 'OL', 'DL', 'LB', 'Secondary'][Math.floor(Math.random() * 6)];
-  const trainerPhilosophies = ['Strength Coach', 'Skill Developer', 'Speed Specialist', 'Veteran Refiner'];
-  const medicalPhilosophies = ['Preventive Specialist', 'Surgical Lead', 'Recovery Architect'];
-  const recruitmentPhilosophies = ['College Pipeline', 'Free Agent Hunter', 'International Scout'];
   return {
     name: `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`,
     role,
@@ -469,14 +439,9 @@ function buildReplacementCoach(teamId: string, role: string, offenseStyle: strin
       role === 'DC' && defenseStyle === 'AGGRESSIVE' ? 'Pressure Merchant' :
       role === 'DC' && defenseStyle === 'PREVENT' ? 'Coverage Professor' :
       role === 'HEAD_COACH' ? 'Program Stabilizer' :
-      role === 'TRAINER' ? trainerPhilosophies[Math.floor(Math.random() * trainerPhilosophies.length)] :
-      role === 'MEDICAL' ? medicalPhilosophies[Math.floor(Math.random() * medicalPhilosophies.length)] :
-      role === 'RECRUITMENT' ? recruitmentPhilosophies[Math.floor(Math.random() * recruitmentPhilosophies.length)] :
       'Balanced Playcaller',
     developmentSpecialty: specialty,
     aggression: defenseStyle === 'AGGRESSIVE' ? 76 : offenseStyle === 'PASS_HEAVY' ? 70 : 52,
-    moraleImpact: Math.floor(Math.random() * 8) - 1,
-    preferredTempo: tempo as any,
     reputation: 42 + Math.floor(Math.random() * 24),
     hotSeat: 18 + Math.floor(Math.random() * 18),
     yearsWithTeam: 1,

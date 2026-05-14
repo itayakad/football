@@ -7,7 +7,7 @@ interface PillProps {
   color?: string; // background tint (semi-transparent applied)
 }
 
-// Compact tag for style identity (PASS_HEAVY, AGGRESSIVE, FAST, etc.)
+// Compact tag for team identity, play families, and coach philosophies.
 // Color encodes meaning — see colors.identity.
 export const Pill: React.FC<PillProps> = ({ label, color = colors.identity.bal }) => (
   <View style={[styles.pill, { backgroundColor: hexWithAlpha(color, 0.18) }]}>
@@ -27,11 +27,13 @@ function hexWithAlpha(hex: string, alpha: number): string {
 export function pillColor(style: string): string {
   switch (style) {
     case 'PASS_HEAVY':  return colors.identity.pass;
+    case 'VERTICAL':    return colors.identity.pass;
     case 'RUN_HEAVY':   return colors.identity.run;
     case 'AGGRESSIVE':  return colors.identity.agg;
+    case 'PRESSURE':    return colors.identity.agg;
+    case 'MAN_HEAVY':   return colors.identity.man;
+    case 'ZONE_HEAVY':  return colors.identity.zone;
     case 'PREVENT':     return colors.identity.prv;
-    case 'FAST':        return colors.identity.fast;
-    case 'SLOW':        return colors.identity.slow;
     case 'FOUR_VERTICALS':
     case 'VERTICAL_SPREAD':
     case 'PA_CROSSERS':
@@ -61,7 +63,6 @@ export function pillColor(style: string): string {
     case 'CONTAIN_EDGES':
       return colors.identity.bal;
     case 'BALANCED':
-    case 'NORMAL':
     default:            return colors.identity.bal;
   }
 }
@@ -70,6 +71,9 @@ export function pillColor(style: string): string {
 export function pillLabel(value: string): string {
   const special: Record<string, string> = {
     RPO_HEAVY: 'RPO Heavy',
+    VERTICAL: 'Vertical',
+    MAN_HEAVY: 'Man Heavy',
+    ZONE_HEAVY: 'Zone Heavy',
     PA_CROSSERS: 'PA Crossers',
     HB_STRETCH: 'HB Stretch',
     COVER_2_SHELL: 'Cover 2 Shell',

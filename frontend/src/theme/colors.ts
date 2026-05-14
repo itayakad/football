@@ -28,15 +28,15 @@ export const colors = {
   danger:  '#FF4D5C',
   warn:    '#F39C12',
 
-  // Style-identity tags (offense / defense / tempo)
+  // Team identity tags (offense / defense)
   identity: {
     pass:   '#5BA8FF',
     run:    '#E68E3C',
     bal:    '#9CA0A6',
     agg:    '#FF6B6B',
     prv:    '#3FBC8C',
-    fast:   '#E0B048',
-    slow:   '#7E84A0',
+    man:    '#14B8A6',
+    zone:   '#3B82F6',
   },
 
   // Lines + dividers (rarely used — prefer background contrast)

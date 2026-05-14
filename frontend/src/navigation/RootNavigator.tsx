@@ -1,11 +1,8 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
-import { RootStackParamList, TabParamList } from './types';
-import { colors, spacing } from '../theme';
+import { RootStackParamList } from './types';
+import { colors } from '../theme';
 
 import { HomeScreen } from '../screens/HomeScreen';
 import { MatchPreviewScreen } from '../screens/MatchPreviewScreen';
@@ -19,62 +16,11 @@ import { PlayoffBracketScreen } from '../screens/PlayoffBracketScreen';
 import { ChooseSchemeScreen } from '../screens/ChooseSchemeScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab   = createBottomTabNavigator<TabParamList>();
-
-type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
-
-function TabIcon({ name, focused }: { name: IoniconName; focused: boolean }) {
-  return (
-    <View style={styles.tabIcon}>
-      <Ionicons
-        name={name}
-        size={26}
-        color={focused ? colors.text.primary : colors.text.muted}
-      />
-    </View>
-  );
-}
-
-function Tabs() {
-  return (
-    <Tab.Navigator
-      initialRouteName="Home"
-      screenOptions={{
-        headerShown: false,
-        tabBarStyle: {
-          backgroundColor:   colors.bg.elevated,
-          borderTopWidth:    0,
-          height:            72,
-          paddingBottom:     spacing.md,
-          paddingTop:        spacing.sm,
-        },
-        tabBarShowLabel:   false,
-        tabBarActiveTintColor:   colors.text.primary,
-        tabBarInactiveTintColor: colors.text.muted,
-      }}
-    >
-      <Tab.Screen
-        name="Team"
-        component={TeamScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'people' : 'people-outline'} focused={focused} /> }}
-      />
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'home' : 'home-outline'} focused={focused} /> }}
-      />
-      <Tab.Screen
-        name="League"
-        component={LeagueScreen}
-        options={{ tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'trophy' : 'trophy-outline'} focused={focused} /> }}
-      />
-    </Tab.Navigator>
-  );
-}
 
 export function RootNavigator() {
   return (
     <Stack.Navigator
+      initialRouteName="Home"
       screenOptions={{
         headerStyle:        { backgroundColor: colors.bg.base },
         headerTintColor:    colors.text.primary,
@@ -84,9 +30,19 @@ export function RootNavigator() {
       }}
     >
       <Stack.Screen
-        name="Tabs"
-        component={Tabs}
+        name="Home"
+        component={HomeScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Team"
+        component={TeamScreen}
+        options={{ title: 'Team' }}
+      />
+      <Stack.Screen
+        name="League"
+        component={LeagueScreen}
+        options={{ title: 'League' }}
       />
       <Stack.Screen
         name="MatchPreview"
@@ -126,10 +82,3 @@ export function RootNavigator() {
     </Stack.Navigator>
   );
 }
-
-const styles = StyleSheet.create({
-  tabIcon: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

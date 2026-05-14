@@ -27,8 +27,6 @@ const LAST_NAMES = [
 const COACH_FIRST_NAMES = ['Frank', 'Marty', 'Calvin', 'Shane', 'Victor', 'Eli', 'Grant', 'Wes', 'Nolan', 'Ray', 'DeMarcus', 'Cole'];
 const COACH_LAST_NAMES = ['Hayes', 'Bennett', 'Porter', 'Hughes', 'Walsh', 'Foster', 'Carver', 'Brooks', 'Madden', 'Sullivan', 'Pierce', 'Graves'];
 const DEVELOPMENT_SPECIALTIES = ['QB', 'Skill', 'OL', 'DL', 'LB', 'Secondary'];
-const MEDICAL_SPECIALTIES = ['Soft Tissue', 'Orthopedic', 'Recovery'];
-const RECRUITMENT_SPECIALTIES = ['College', 'Pro', 'International'];
 
 // ─── League Config ────────────────────────────────────────
 
@@ -41,55 +39,48 @@ const LEAGUES = [
 // Each team has a distinct philosophical identity — not just ratings.
 // This is what makes games feel different from each other.
 //
-// Identity combos create narrative archetypes:
-//   PASS_HEAVY + AGGRESSIVE + FAST  = "Gunslinger" — explosive, volatile, high stakes
-//   RUN_HEAVY  + AGGRESSIVE + SLOW  = "Smashmouth" — physical, low scoring, grinds you down
-//   BALANCED   + PREVENT   + NORMAL = "Ball control" — methodical, minimizes mistakes
-//   PASS_HEAVY + PREVENT   + FAST   = "Air raid meets bend-don't-break"
-//
 const TEAMS_BY_TIER: Record<number, Array<{
   name: string;
   offense: number;
   defense: number;
   offenseStyle: string;
   defenseStyle: string;
-  tempo: string;
 }>> = {
   1: [
-    { name: 'New York Titans',    offense: 88, defense: 82, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE', tempo: 'NORMAL' }, // Complete team
-    { name: 'Los Angeles Wolves', offense: 83, defense: 79, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED',   tempo: 'FAST'   }, // Hollywood air raid
-    { name: 'Chicago Storm',      offense: 78, defense: 85, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE', tempo: 'SLOW'   }, // Smashmouth identity
-    { name: 'Dallas Vanguard',    offense: 85, defense: 75, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE', tempo: 'FAST'   }, // Gunslinger — volatile
-    { name: 'Miami Thunder',      offense: 76, defense: 78, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT',    tempo: 'FAST'   }, // Spread + bend-don't-break
-    { name: 'Seattle Falcons',    offense: 80, defense: 83, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT',    tempo: 'NORMAL' }, // Conservative, wins ugly
-    { name: 'Boston Monarchs',    offense: 74, defense: 80, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED',   tempo: 'SLOW'   }, // Clock-eating grinders
-    { name: 'Denver Pioneers',    offense: 79, defense: 76, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE', tempo: 'NORMAL' }, // Solid two-way team
-    { name: 'Philadelphia Liberty', offense: 81, defense: 79, offenseStyle: 'BALANCED',   defenseStyle: 'BALANCED',   tempo: 'NORMAL' }, // Well-rounded contender
-    { name: 'Pittsburgh Iron',     offense: 74, defense: 86, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE', tempo: 'SLOW'   }, // Old-school heavy
+    { name: 'New York Titans',    offense: 88, defense: 82, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' }, // Complete team
+    { name: 'Los Angeles Wolves', offense: 83, defense: 79, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   }, // Hollywood air raid
+    { name: 'Chicago Storm',      offense: 78, defense: 85, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' }, // Smashmouth identity
+    { name: 'Dallas Vanguard',    offense: 85, defense: 75, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' }, // Gunslinger
+    { name: 'Miami Thunder',      offense: 76, defense: 78, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    }, // Spread + bend-don't-break
+    { name: 'Seattle Falcons',    offense: 80, defense: 83, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    }, // Conservative, wins ugly
+    { name: 'Boston Monarchs',    offense: 74, defense: 80, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   }, // Clock-eating grinders
+    { name: 'Denver Pioneers',    offense: 79, defense: 76, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' }, // Solid two-way team
+    { name: 'Philadelphia Liberty', offense: 81, defense: 79, offenseStyle: 'BALANCED',   defenseStyle: 'BALANCED'   }, // Well-rounded contender
+    { name: 'Pittsburgh Iron',     offense: 74, defense: 86, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' }, // Old-school heavy
   ],
   2: [
-    { name: 'Atlanta Blaze',      offense: 73, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE', tempo: 'FAST'   }, // High-risk, high-reward
-    { name: 'Houston Force',      offense: 68, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE', tempo: 'NORMAL' }, // Power football
-    { name: 'Phoenix Fury',       offense: 70, defense: 65, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED',   tempo: 'FAST'   }, // Desert air attack
-    { name: 'Portland Surge',     offense: 65, defense: 71, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT',    tempo: 'SLOW'   }, // Defensive grinders
-    { name: 'Nashville Vipers',   offense: 67, defense: 69, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED',   tempo: 'SLOW'   }, // Old-school ground game
-    { name: 'Kansas Stallions',   offense: 72, defense: 67, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE', tempo: 'NORMAL' }, // Press defense identity
-    { name: 'Tampa Barracudas',   offense: 64, defense: 71, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT',    tempo: 'NORMAL' }, // Air raid + prevent
-    { name: 'San Diego Aviators', offense: 71, defense: 66, offenseStyle: 'BALANCED',   defenseStyle: 'BALANCED',   tempo: 'FAST'   }, // Well-rounded up-tempo
-    { name: 'Detroit Motors',     offense: 70, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE', tempo: 'FAST'   }, // Modern, gritty
-    { name: 'Cleveland Anchors',  offense: 65, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'PREVENT',    tempo: 'SLOW'   }, // Defense-first grinders
+    { name: 'Atlanta Blaze',      offense: 73, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' }, // High-risk, high-reward
+    { name: 'Houston Force',      offense: 68, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' }, // Power football
+    { name: 'Phoenix Fury',       offense: 70, defense: 65, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   }, // Desert air attack
+    { name: 'Portland Surge',     offense: 65, defense: 71, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    }, // Defensive grinders
+    { name: 'Nashville Vipers',   offense: 67, defense: 69, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   }, // Old-school ground game
+    { name: 'Kansas Stallions',   offense: 72, defense: 67, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' }, // Press defense identity
+    { name: 'Tampa Barracudas',   offense: 64, defense: 71, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    }, // Air raid + prevent
+    { name: 'San Diego Aviators', offense: 71, defense: 66, offenseStyle: 'BALANCED',   defenseStyle: 'BALANCED'   }, // Well-rounded
+    { name: 'Detroit Motors',     offense: 70, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' }, // Modern, gritty
+    { name: 'Cleveland Anchors',  offense: 65, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'PREVENT'    }, // Defense-first grinders
   ],
   3: [
-    { name: 'Columbus Crushers',    offense: 62, defense: 57, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE', tempo: 'SLOW'   },
-    { name: 'Birmingham Bulls',     offense: 55, defense: 62, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED',   tempo: 'SLOW'   },
-    { name: 'Raleigh Rockets',      offense: 58, defense: 55, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE', tempo: 'NORMAL' },
-    { name: 'Sacramento Strikers',  offense: 61, defense: 59, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT',    tempo: 'FAST'   },
-    { name: 'Louisville Lightning', offense: 54, defense: 58, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED',   tempo: 'FAST'   },
-    { name: 'Omaha Outlaws',        offense: 57, defense: 56, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE', tempo: 'NORMAL' },
-    { name: 'Tulsa Tigers',         offense: 60, defense: 54, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT',    tempo: 'NORMAL' },
-    { name: 'Albuquerque Arsenal',  offense: 53, defense: 60, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED',   tempo: 'SLOW'   },
-    { name: 'Memphis Mules',        offense: 56, defense: 59, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE', tempo: 'NORMAL' },
-    { name: 'Saint Louis Sentinels',offense: 60, defense: 56, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED',   tempo: 'FAST'   },
+    { name: 'Columbus Crushers',    offense: 62, defense: 57, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
+    { name: 'Birmingham Bulls',     offense: 55, defense: 62, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   },
+    { name: 'Raleigh Rockets',      offense: 58, defense: 55, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' },
+    { name: 'Sacramento Strikers',  offense: 61, defense: 59, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    },
+    { name: 'Louisville Lightning', offense: 54, defense: 58, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   },
+    { name: 'Omaha Outlaws',        offense: 57, defense: 56, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
+    { name: 'Tulsa Tigers',         offense: 60, defense: 54, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    },
+    { name: 'Albuquerque Arsenal',  offense: 53, defense: 60, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   },
+    { name: 'Memphis Mules',        offense: 56, defense: 59, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
+    { name: 'Saint Louis Sentinels',offense: 60, defense: 56, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   },
   ],
 };
 
@@ -177,11 +168,9 @@ export async function seedWorld(): Promise<void> {
             offenseStyle:  c.offenseStyle as any,
             offensivePhilosophy: philosophyForStyle(c.offenseStyle) as any,
             defenseStyle:  c.defenseStyle as any,
-            tempo:         c.tempo as any,
             offensivePlays: offensiveLoadoutForStyle(c.offenseStyle) as any,
             defensivePlays: defensiveLoadoutForStyle(c.defenseStyle) as any,
             money:         150_000_000,
-            morale:        70,
           },
         })
       )
@@ -192,13 +181,13 @@ export async function seedWorld(): Promise<void> {
 
   const teamsForCoaches = await prisma.team.findMany();
   await prisma.coach.createMany({
-    data: teamsForCoaches.flatMap((team) => buildCoachStaff(team.id, team.offenseStyle, team.defenseStyle, team.tempo)),
+    data: teamsForCoaches.flatMap((team) => buildCoachStaff(team.id, team.offenseStyle, team.defenseStyle)),
   });
-  console.log(`  ✓ ${teamsForCoaches.length * 6} staff`);
+  console.log(`  ✓ ${teamsForCoaches.length * 3} staff`);
 
   const playerData: Array<{
     name: string; position: string; overall: number;
-    potential: number; age: number; morale: number; fatigue: number; teamId: string;
+    potential: number; age: number; teamId: string;
     salary: number; contractYearsLeft: number; extensionEligible: boolean;
   }> = [];
 
@@ -213,8 +202,6 @@ export async function seedWorld(): Promise<void> {
           overall,
           potential: generatePotential(age, overall),
           age,
-          morale:    randomInt(60, 85),
-          fatigue:   0,
           teamId:    team.id,
           salary:    generateSalary(overall, age),
           contractYearsLeft: randomInt(1, 4),
@@ -289,7 +276,7 @@ function defensiveLoadoutForStyle(defenseStyle: string): string[] {
   return loadoutByWeights(DEFENSIVE_PLAYS, [['ZONE', 3], ['BLITZ', 2], ['ZONE_BLITZ', 2], ['MAN', 2]]);
 }
 
-export function buildCoachStaff(teamId: string, offenseStyle: string, defenseStyle: string, tempo: string) {
+export function buildCoachStaff(teamId: string, offenseStyle: string, defenseStyle: string) {
   const offensiveSpecialty = offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : randomElement(['QB', 'Skill', 'OL']);
   const defensiveSpecialty = defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? randomElement(['DL', 'LB']) : randomElement(['LB', 'Secondary']);
   const hcOvr = randomInt(50, 82);
@@ -302,8 +289,6 @@ export function buildCoachStaff(teamId: string, offenseStyle: string, defenseSty
       philosophy: offenseStyle === 'RUN_HEAVY' ? 'Old-School Builder' : offenseStyle === 'PASS_HEAVY' ? 'Modern Shot-Caller' : 'Program Stabilizer',
       developmentSpecialty: randomElement(DEVELOPMENT_SPECIALTIES),
       aggression: defenseStyle === 'AGGRESSIVE' ? randomInt(70, 92) : randomInt(35, 70),
-      moraleImpact: randomInt(-2, 8),
-      preferredTempo: tempo as any,
       reputation: randomInt(45, 78),
       overall: hcOvr,
       offenseRating: clampRating(hcOvr + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? randomInt(2, 8) : randomInt(-2, 5))),
@@ -318,8 +303,6 @@ export function buildCoachStaff(teamId: string, offenseStyle: string, defenseSty
       philosophy: offenseStyle === 'PASS_HEAVY' ? 'Vertical Architect' : offenseStyle === 'RUN_HEAVY' ? 'Ground Game Designer' : 'Balanced Playcaller',
       developmentSpecialty: offensiveSpecialty,
       aggression: offenseStyle === 'PASS_HEAVY' ? randomInt(65, 92) : randomInt(30, 68),
-      moraleImpact: randomInt(-1, 5),
-      preferredTempo: tempo as any,
       reputation: randomInt(38, 72),
       overall: ocOvr,
       offenseRating: clampRating(ocOvr + randomInt(0, 8)),
@@ -334,53 +317,12 @@ export function buildCoachStaff(teamId: string, offenseStyle: string, defenseSty
       philosophy: defenseStyle === 'AGGRESSIVE' ? 'Pressure Merchant' : defenseStyle === 'PREVENT' ? 'Coverage Professor' : 'Flexible Defender',
       developmentSpecialty: defensiveSpecialty,
       aggression: defenseStyle === 'AGGRESSIVE' ? randomInt(72, 95) : randomInt(28, 66),
-      moraleImpact: randomInt(-1, 5),
-      preferredTempo: tempo as any,
       reputation: randomInt(38, 72),
       overall: dcOvr,
       offenseRating: clampRating(dcOvr + randomInt(-8, 0)),
       defenseRating: clampRating(dcOvr + randomInt(0, 8)),
       hotSeat: randomInt(8, 28),
       age: randomInt(34, 60),
-      teamId,
-    },
-    {
-      name: randomCoachName(),
-      role: 'TRAINER',
-      philosophy: randomElement(['Strength Coach', 'Skill Developer', 'Speed Specialist', 'Veteran Refiner']),
-      developmentSpecialty: randomElement(DEVELOPMENT_SPECIALTIES),
-      aggression: randomInt(30, 60),
-      moraleImpact: randomInt(0, 6),
-      preferredTempo: tempo as any,
-      reputation: randomInt(35, 70),
-      hotSeat: randomInt(5, 22),
-      age: randomInt(32, 58),
-      teamId,
-    },
-    {
-      name: randomCoachName(),
-      role: 'MEDICAL',
-      philosophy: randomElement(['Preventive Specialist', 'Surgical Lead', 'Recovery Architect']),
-      developmentSpecialty: randomElement(MEDICAL_SPECIALTIES),
-      aggression: randomInt(20, 45),
-      moraleImpact: randomInt(0, 4),
-      preferredTempo: tempo as any,
-      reputation: randomInt(40, 72),
-      hotSeat: randomInt(5, 20),
-      age: randomInt(36, 60),
-      teamId,
-    },
-    {
-      name: randomCoachName(),
-      role: 'RECRUITMENT',
-      philosophy: randomElement(['College Pipeline', 'Free Agent Hunter', 'International Scout']),
-      developmentSpecialty: randomElement(RECRUITMENT_SPECIALTIES),
-      aggression: randomInt(35, 70),
-      moraleImpact: randomInt(-1, 3),
-      preferredTempo: tempo as any,
-      reputation: randomInt(38, 72),
-      hotSeat: randomInt(5, 22),
-      age: randomInt(33, 58),
       teamId,
     },
   ];

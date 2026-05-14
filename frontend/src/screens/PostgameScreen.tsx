@@ -29,19 +29,7 @@ export const PostgameScreen: React.FC = () => {
     return false; // populated below
   })();
 
-  // Determine W/L from the user's perspective
-  const userTeamId  = route.params.userTeamId;
-  const _userIsHome = userTeamId === undefined ? false : false;
-  // We need to check via the matchId. Since the dashboard refresh handles it,
-  // here we simply show the result. To label W/L, infer from team names is fragile —
-  // the simplest solid approach: assume userIsHome based on which team won the morale boost.
-  // (moraleChange.home > 0 means home won, etc.)
-  const userScore = (() => {
-    // We don't actually have userTeamId-vs-side mapping client-side without another
-    // round-trip. The Postgame UI shows both scores symmetrically; outcome label
-    // is derived from result.moraleChange + checking which side gained.
-    return result.homeScore > result.awayScore ? 'home' : result.awayScore > result.homeScore ? 'away' : 'tie';
-  })();
+  const userScore = result.homeScore > result.awayScore ? 'home' : result.awayScore > result.homeScore ? 'away' : 'tie';
 
   // Final outcome (just the score; W/L color hint shown subtly)
   const isTie    = result.homeScore === result.awayScore;
@@ -130,29 +118,6 @@ export const PostgameScreen: React.FC = () => {
         </View>
       </Card>
 
-      {/* ── Morale Impact ────────────────────────────────── */}
-      <Card>
-        <SectionLabel>Morale Impact</SectionLabel>
-        <View style={styles.moraleRow}>
-          <Text style={typography.body}>{result.homeTeamName}</Text>
-          <Text style={[
-            typography.heading,
-            { color: result.moraleChange.home >= 0 ? colors.success : colors.danger },
-          ]}>
-            {result.moraleChange.home >= 0 ? '+' : ''}{result.moraleChange.home}
-          </Text>
-        </View>
-        <View style={styles.moraleRow}>
-          <Text style={typography.body}>{result.awayTeamName}</Text>
-          <Text style={[
-            typography.heading,
-            { color: result.moraleChange.away >= 0 ? colors.success : colors.danger },
-          ]}>
-            {result.moraleChange.away >= 0 ? '+' : ''}{result.moraleChange.away}
-          </Text>
-        </View>
-      </Card>
-
       <Button
         label={seasonAdvance ? 'Season recap' : 'Done'}
         onPress={() => {
@@ -170,7 +135,7 @@ export const PostgameScreen: React.FC = () => {
           navigation.dispatch(
             CommonActions.reset({
               index: 0,
-              routes: [{ name: 'Tabs' }],
+              routes: [{ name: 'Home' }],
             })
           );
         }}
@@ -227,11 +192,5 @@ const styles = StyleSheet.create({
     gap:           spacing.sm,
     flex:          1,
     flexWrap:      'wrap',
-  },
-  moraleRow: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-    paddingVertical: spacing.sm,
   },
 });

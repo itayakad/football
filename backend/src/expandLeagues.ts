@@ -58,19 +58,17 @@ async function expandLeagues(): Promise<void> {
           offenseStyle:        config.offenseStyle as any,
           offensivePhilosophy: philosophyForStyle(config.offenseStyle) as any,
           defenseStyle:        config.defenseStyle as any,
-          tempo:               config.tempo as any,
           money:               150_000_000,
-          morale:              70,
         },
       });
 
       await prisma.coach.createMany({
-        data: buildCoachStaff(team.id, team.offenseStyle, team.defenseStyle, team.tempo),
+        data: buildCoachStaff(team.id, team.offenseStyle, team.defenseStyle),
       });
 
       const players: Array<{
         name: string; position: string; overall: number; potential: number;
-        age: number; morale: number; fatigue: number; teamId: string;
+        age: number; teamId: string;
         salary: number; contractYearsLeft: number; extensionEligible: boolean;
       }> = [];
       for (const { position, count } of POSITION_DISTRIBUTION) {
@@ -83,8 +81,6 @@ async function expandLeagues(): Promise<void> {
             overall,
             potential:         generatePotential(age, overall),
             age,
-            morale:            randomInt(60, 85),
-            fatigue:           0,
             teamId:            team.id,
             salary:            generateSalary(overall, age),
             contractYearsLeft: randomInt(1, 4),
@@ -103,7 +99,6 @@ async function expandLeagues(): Promise<void> {
   console.log(`  • rebuilding schedules`);
   await prisma.transferOffer.deleteMany({ where: { listing: { status: { not: 'ACTIVE' } } } });
   await prisma.match.deleteMany();
-  await prisma.team.updateMany({ data: { trainWeek: 0, healWeek: 0, recruitWeek: 0 } });
 
   const leaguesAfter = await prisma.league.findMany({
     include: { teams: true },

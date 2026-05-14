@@ -22,9 +22,6 @@ export interface PlayerProfile {
   name: string;
   position: string;
   overall: number;
-  fatigue?: number;
-  injuryStatus?: string;
-  injuryWeeks?: number;
 }
 
 export interface CoachProfile {
@@ -67,7 +64,29 @@ export interface PlayEvent {
   offenseWon: boolean;
   resultLabel: ResultLabel;
   yards: number;
+  calculation?: PlayCalculation;
+  highlightPlayer?: { name: string; position: string; overall: number };
   scoringEvent?: 'TD' | 'DEFENSIVE_TD' | 'SAFETY' | 'TURNOVER' | 'FUMBLE' | 'INT' | 'FG_GOOD' | 'FG_MISS' | 'PUNT' | 'TURNOVER_ON_DOWNS';
+}
+
+export interface PlayCalculation {
+  offBaseRaw: number;
+  defBaseRaw: number;
+  offHomeBonus: number;
+  defHomeBonus: number;
+  offBase: number;
+  defBase: number;
+  offMatchup: number;
+  defMatchup: number;
+  ocOverall: number;
+  dcOverall: number;
+  ocMod: number;
+  dcMod: number;
+  offFinal: number;
+  defFinal: number;
+  offWinProb: number;
+  roll: number;
+  severity: number;
 }
 
 export interface DriveOutcome {
@@ -136,7 +155,7 @@ function buildSlotMap(players: PlayerProfile[]): SlotMap {
   for (const group of POSITION_TO_SLOTS) {
     const sorted = players
       .filter((p) => p.position === group.position)
-      .map((p) => ({ player: p, score: effectiveOverall(p) }))
+      .map((p) => ({ player: p, score: p.overall }))
       .sort((a, b) => b.score - a.score);
     group.slots.forEach((slot, i) => {
       map[slot] = sorted[i]?.player ?? null;
@@ -145,25 +164,23 @@ function buildSlotMap(players: PlayerProfile[]): SlotMap {
   return map as SlotMap;
 }
 
-function effectiveOverall(player: PlayerProfile): number {
-  const fatigue = player.fatigue ?? 0;
-  const fatiguePenalty = fatigue >= 80 ? 8 : fatigue >= 60 ? 5 : fatigue >= 40 ? 2 : 0;
-  const injuryPenalty =
-    player.injuryStatus === 'MULTI_WEEK' && (player.injuryWeeks ?? 0) > 0 ? 18 :
-    player.injuryStatus === 'MINOR' ? 8 :
-    player.injuryStatus === 'QUESTIONABLE' ? 4 :
-    0;
-  return Math.max(35, player.overall - fatiguePenalty - injuryPenalty);
-}
-
 function slotRating(slot: PlayerSlot, slots: SlotMap): number {
   const p = slots[slot];
   if (!p) return 55; // sensible league-floor fallback if a slot is empty
-  return effectiveOverall(p);
+  return p.overall;
 }
 
 function basePlayStrength(play: Play, slots: SlotMap): number {
   return play.keySlots.reduce((sum, slot) => sum + slotRating(slot, slots), 0) / 3;
+}
+
+function highlightForPlay(play: Play, slots: SlotMap): PlayEvent['highlightPlayer'] {
+  const candidates = play.keySlots
+    .map((slot) => slots[slot])
+    .filter((player): player is PlayerProfile => !!player)
+    .sort((a, b) => b.overall - a.overall);
+  const player = candidates[0];
+  return player ? { name: player.name, position: player.position, overall: player.overall } : undefined;
 }
 
 // ── Coach helpers ─────────────────────────────────────────
@@ -317,6 +334,7 @@ interface PlayResolution {
   offenseWon: boolean;
   yards: number;
   resultLabel: ResultLabel;
+  calculation: PlayCalculation;
   scoringEvent?: PlayEvent['scoringEvent'];
 }
 
@@ -328,8 +346,10 @@ function resolvePlay(
 ): PlayResolution {
   const offBaseRaw = basePlayStrength(offPlay, off.slots);
   const defBaseRaw = basePlayStrength(defPlay, def.slots);
-  const offBase = off.isHome ? offBaseRaw + HOME_FIELD_PLAY_BONUS : offBaseRaw;
-  const defBase = def.isHome ? defBaseRaw + HOME_FIELD_PLAY_BONUS : defBaseRaw;
+  const offHomeBonus = off.isHome ? HOME_FIELD_PLAY_BONUS : 0;
+  const defHomeBonus = def.isHome ? HOME_FIELD_PLAY_BONUS : 0;
+  const offBase = offBaseRaw + offHomeBonus;
+  const defBase = defBaseRaw + defHomeBonus;
 
   const offMatchup = offensiveMatchupMod(offPlay.category, defPlay.category);
   const defMatchup = defensiveMatchupMod(offPlay.category, defPlay.category);
@@ -341,7 +361,8 @@ function resolvePlay(
   const defFinal = defBase * defMatchup * dcMod;
 
   const offWinProb = offFinal / (offFinal + defFinal);
-  const offenseWon = Math.random() < offWinProb;
+  const roll = Math.random();
+  const offenseWon = roll < offWinProb;
 
   // Severity: bell curve shifted toward the winner. Margin amplifies the shift.
   const margin = Math.abs(offWinProb - 0.5) * 2; // 0..1
@@ -349,7 +370,25 @@ function resolvePlay(
   const baseShift = offenseWon ? +shiftMagnitude : -shiftMagnitude;
   const severity = gaussian(baseShift, 0.9);
 
-  return mapSeverityToOutcome(severity, offPlay, defPlay, offWinProb, offenseWon);
+  return mapSeverityToOutcome(severity, offPlay, defPlay, offWinProb, offenseWon, {
+    offBaseRaw,
+    defBaseRaw,
+    offHomeBonus,
+    defHomeBonus,
+    offBase,
+    defBase,
+    offMatchup,
+    defMatchup,
+    ocOverall: off.coach.ocOverall,
+    dcOverall: def.coach.dcOverall,
+    ocMod,
+    dcMod,
+    offFinal,
+    defFinal,
+    offWinProb,
+    roll,
+    severity,
+  });
 }
 
 function mapSeverityToOutcome(
@@ -358,6 +397,7 @@ function mapSeverityToOutcome(
   defPlay: DefensivePlay,
   offWinProb: number,
   offenseWon: boolean,
+  calculation: PlayCalculation,
 ): PlayResolution {
   let yards: number;
   let label: ResultLabel;
@@ -399,6 +439,7 @@ function mapSeverityToOutcome(
     offenseWon,
     yards: Math.round(yards),
     resultLabel: label,
+    calculation,
     scoringEvent,
   };
 }
@@ -476,6 +517,8 @@ function simulateDrive(
       offWinProb: res.offWinProb, offenseWon: res.offenseWon,
       resultLabel: res.resultLabel,
       yards: appliedYards,
+      calculation: res.calculation,
+      highlightPlayer: highlightForPlay(res.offenseWon ? offPlay : defPlay, res.offenseWon ? off.slots : def.slots),
       scoringEvent,
     });
 
