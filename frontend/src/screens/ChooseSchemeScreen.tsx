@@ -52,6 +52,7 @@ export const ChooseSchemeScreen: React.FC = () => {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['schemes', userTeamId, unit] });
     queryClient.invalidateQueries({ queryKey: ['roster', userTeamId] });
+    queryClient.invalidateQueries({ queryKey: ['dashboard', userTeamId] });
     queryClient.invalidateQueries({ queryKey: ['matchPreview'] });
   };
 
@@ -77,6 +78,14 @@ export const ChooseSchemeScreen: React.FC = () => {
     mutationFn: (scheme: TeamScheme) => api.deleteScheme(userTeamId!, scheme.id),
     onSuccess: () => {
       setActiveId(null);
+      refresh();
+    },
+  });
+
+  const setActiveScheme = useMutation({
+    mutationFn: (scheme: TeamScheme) => api.updateScheme(userTeamId!, scheme.id, { isDefault: true }),
+    onSuccess: (scheme) => {
+      setActiveId(scheme.id);
       refresh();
     },
   });
@@ -132,6 +141,7 @@ export const ChooseSchemeScreen: React.FC = () => {
             style={[styles.schemeTab, scheme.id === active.id && styles.schemeTabActive]}
           >
             <Text style={[styles.schemeTabText, scheme.id === active.id && styles.schemeTabTextActive]}>{scheme.name}</Text>
+            {scheme.isDefault && <Text style={styles.activeSchemeText}>Active</Text>}
           </Pressable>
         ))}
         <Pressable onPress={() => create.mutate()} style={styles.schemeTab}>
@@ -152,6 +162,11 @@ export const ChooseSchemeScreen: React.FC = () => {
           <Pressable disabled={update.isPending || draftPlays.length !== 9} onPress={() => update.mutate()} style={styles.primaryButton}>
             <Text style={styles.primaryButtonText}>{update.isPending ? 'Saving...' : 'Save 9 Plays'}</Text>
           </Pressable>
+          {!active.isDefault && (
+            <Pressable disabled={setActiveScheme.isPending} onPress={() => setActiveScheme.mutate(active)} style={styles.activeButton}>
+              <Text style={styles.activeButtonText}>{setActiveScheme.isPending ? 'Setting...' : 'Set Active'}</Text>
+            </Pressable>
+          )}
           {!active.isDefault && (
             <Pressable disabled={remove.isPending} onPress={() => remove.mutate(active)} style={styles.deleteButton}>
               <Text style={styles.deleteButtonText}>Delete</Text>
@@ -446,6 +461,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   schemeTab: {
+    minWidth: 92,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
     backgroundColor: colors.bg.surface,
@@ -463,6 +479,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   schemeTabTextActive: { color: colors.bg.base },
+  activeSchemeText: {
+    ...typography.caption,
+    color: colors.success,
+    fontSize: 9,
+    fontWeight: '900',
+    marginTop: spacing.xs,
+    textTransform: 'uppercase',
+  },
   input: {
     minHeight: 44,
     borderRadius: radius.md,
@@ -475,6 +499,7 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
     marginTop: spacing.md,
   },
@@ -487,6 +512,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryButtonText: {
+    ...typography.label,
+    color: colors.bg.base,
+    fontWeight: '800',
+  },
+  activeButton: {
+    minHeight: 42,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeButtonText: {
     ...typography.label,
     color: colors.bg.base,
     fontWeight: '800',

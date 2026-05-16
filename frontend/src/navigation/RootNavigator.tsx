@@ -9,6 +9,9 @@ import { MatchPreviewScreen } from '../screens/MatchPreviewScreen';
 import { MatchSimScreen } from '../screens/MatchSimScreen';
 import { PostgameScreen } from '../screens/PostgameScreen';
 import { TeamScreen } from '../screens/TeamScreen';
+import { StadiumScreen } from '../screens/StadiumScreen';
+import { FriendsScreen } from '../screens/FriendsScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { LeagueScreen } from '../screens/LeagueScreen';
 import { SeasonAwardsScreen } from '../screens/SeasonAwardsScreen';
 import { SeasonTransitionScreen } from '../screens/SeasonTransitionScreen';
@@ -37,7 +40,22 @@ export function RootNavigator() {
       <Stack.Screen
         name="Team"
         component={TeamScreen}
-        options={{ title: 'Team' }}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Stadium"
+        component={StadiumScreen}
+        options={{ title: 'Stadium' }}
+      />
+      <Stack.Screen
+        name="Friends"
+        component={FriendsScreen}
+        options={{ title: 'Friends' }}
+      />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        options={{ title: 'Settings' }}
       />
       <Stack.Screen
         name="League"

@@ -2,6 +2,9 @@
 export type RootStackParamList = {
   Home:             undefined;
   Team:             undefined;
+  Stadium:          undefined;
+  Friends:          undefined;
+  Settings:         undefined;
   League:           undefined;
   MatchPreview:     { matchId: string };
   MatchSim:         { matchId: string; userTeamId: string };

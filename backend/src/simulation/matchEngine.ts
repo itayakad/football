@@ -198,12 +198,19 @@ function extractCoachOVRs(coaches?: CoachProfile[]): CoachOVRs {
   const oc = coaches?.find((c) => c.role === 'OC');
   const dc = coaches?.find((c) => c.role === 'DC');
   return {
-    hcOverall: hc?.overall ?? hc?.reputation ?? 60,
+    hcOverall: coachOverall(hc),
     hcOffense: hc?.offenseRating ?? hc?.overall ?? hc?.reputation ?? 60,
     hcDefense: hc?.defenseRating ?? hc?.overall ?? hc?.reputation ?? 60,
-    ocOverall: oc?.overall ?? oc?.reputation ?? 60,
-    dcOverall: dc?.overall ?? dc?.reputation ?? 60,
+    ocOverall: coachOverall(oc),
+    dcOverall: coachOverall(dc),
   };
+}
+
+function coachOverall(coach?: CoachProfile): number {
+  if (!coach) return 60;
+  const off = coach.offenseRating ?? coach.overall ?? coach.reputation ?? 60;
+  const def = coach.defenseRating ?? coach.overall ?? coach.reputation ?? 60;
+  return Math.round((off + def) / 2);
 }
 
 // ── Per-team match context ────────────────────────────────

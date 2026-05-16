@@ -23,6 +23,13 @@ import { computeRecentForm } from './teamForm';
 import { generateNewsFeed } from './newsGenerator';
 import { finalizeCurrentSeason } from '../simulation/seasonHistory';
 import { advanceOffseason } from '../simulation/offseason';
+import {
+  pickDefensiveCoachPhilosophy,
+  pickHeadCoachPhilosophy,
+  pickOffensiveCoachPhilosophy,
+  randomDefensiveIdentity,
+  randomOffensiveIdentity,
+} from '../simulation/coachPhilosophy';
 
 const app  = express();
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
@@ -158,13 +165,19 @@ function randomCoachName(): string {
 
 function buildCoachCandidate(role: CoachRole) {
   const specialty = COACH_SPECIALTIES[Math.floor(Math.random() * COACH_SPECIALTIES.length)];
+  const baseRating = 48 + Math.floor(Math.random() * 32); // 48..79
+  const offenseRating =
+    role === 'OC' ? Math.min(99, baseRating + 4 + Math.floor(Math.random() * 8)) :
+    role === 'DC' ? Math.max(35, baseRating - 4 - Math.floor(Math.random() * 8)) :
+    Math.max(35, Math.min(99, baseRating + (Math.floor(Math.random() * 12) - 4)));
+  const defenseRating =
+    role === 'DC' ? Math.min(99, baseRating + 4 + Math.floor(Math.random() * 8)) :
+    role === 'OC' ? Math.max(35, baseRating - 4 - Math.floor(Math.random() * 8)) :
+    Math.max(35, Math.min(99, baseRating + (Math.floor(Math.random() * 12) - 4)));
   const philosophy =
-    role === 'OC' && specialty === 'QB' ? 'Vertical Architect' :
-    role === 'OC' && specialty === 'OL' ? 'Ground Game Designer' :
-    role === 'DC' && specialty === 'Secondary' ? 'Coverage Professor' :
-    role === 'DC' && ['DL', 'LB'].includes(specialty) ? 'Pressure Merchant' :
-    role === 'HEAD_COACH' && Math.random() > 0.5 ? 'Program Stabilizer' :
-    role === 'HEAD_COACH' ? 'Culture Builder' :
+    role === 'OC' ? pickOffensiveCoachPhilosophy(randomOffensiveIdentity()) :
+    role === 'DC' ? pickDefensiveCoachPhilosophy(randomDefensiveIdentity()) :
+    role === 'HEAD_COACH' ? pickHeadCoachPhilosophy(offenseRating, defenseRating) :
     'Balanced Playcaller';
   return {
     name: randomCoachName(),
@@ -173,6 +186,9 @@ function buildCoachCandidate(role: CoachRole) {
     developmentSpecialty: specialty,
     aggression: 35 + Math.floor(Math.random() * 58),
     reputation: 42 + Math.floor(Math.random() * 36),
+    overall: Math.round((offenseRating + defenseRating) / 2),
+    offenseRating,
+    defenseRating,
     hotSeat: 8 + Math.floor(Math.random() * 28),
     yearsWithTeam: 0,
     age: 34 + Math.floor(Math.random() * 28),
@@ -189,6 +205,9 @@ function coachPayload(coach: any) {
     developmentSpecialty: coach.developmentSpecialty,
     aggression: coach.aggression,
     reputation: coach.reputation,
+    overall: Math.round((coach.offenseRating + coach.defenseRating) / 2),
+    offenseRating: coach.offenseRating,
+    defenseRating: coach.defenseRating,
     careerWins: coach.careerWins,
     careerLosses: coach.careerLosses,
     titles: coach.titles,
@@ -382,14 +401,52 @@ async function ensureDefaultSchemes(teamId: string): Promise<void> {
   const existing = await prisma.teamScheme.findMany({ where: { teamId }, select: { unit: true } });
   const hasOffense = existing.some((scheme) => scheme.unit === 'offense');
   const hasDefense = existing.some((scheme) => scheme.unit === 'defense');
+  const team = (!hasOffense || !hasDefense)
+    ? await prisma.team.findUnique({ where: { id: teamId }, select: { offensivePlays: true, defensivePlays: true } })
+    : null;
   const data = [];
   if (!hasOffense) {
-    data.push({ teamId, unit: 'offense', name: 'Base Offense', plays: defaultLoadout('offense') as any, isDefault: true });
+    data.push({
+      teamId,
+      unit: 'offense',
+      name: 'Base Offense',
+      plays: normalizePlayLoadout('offense', team?.offensivePlays) as any,
+      isDefault: true,
+    });
   }
   if (!hasDefense) {
-    data.push({ teamId, unit: 'defense', name: 'Base Defense', plays: defaultLoadout('defense') as any, isDefault: true });
+    data.push({
+      teamId,
+      unit: 'defense',
+      name: 'Base Defense',
+      plays: normalizePlayLoadout('defense', team?.defensivePlays) as any,
+      isDefault: true,
+    });
   }
   if (data.length > 0) await prisma.teamScheme.createMany({ data, skipDuplicates: true });
+}
+
+type TeamWithLoadout = { offensivePlays?: unknown; defensivePlays?: unknown };
+type SchemeWithLoadout = { unit: string; plays: unknown; isDefault: boolean };
+
+function activeSchemePlays(unit: PlayUnit, schemes: SchemeWithLoadout[] | undefined, fallback: unknown): string[] {
+  const unitSchemes = (schemes ?? []).filter((scheme) => scheme.unit === unit);
+  const active = unitSchemes.find((scheme) => scheme.isDefault) ?? unitSchemes[0];
+  return normalizePlayLoadout(unit, active?.plays ?? fallback);
+}
+
+function identityFromActiveSchemes(team: TeamWithLoadout & { schemes?: SchemeWithLoadout[] }): TeamIdentity {
+  return deriveTeamIdentity({
+    offensivePlays: activeSchemePlays('offense', team.schemes, team.offensivePlays),
+    defensivePlays: activeSchemePlays('defense', team.schemes, team.defensivePlays),
+  });
+}
+
+function gameplanFromActiveSchemes(team: TeamWithLoadout & { schemes?: SchemeWithLoadout[] }): Gameplan {
+  return normalizeGameplan({
+    offensivePlays: activeSchemePlays('offense', team.schemes, team.offensivePlays),
+    defensivePlays: activeSchemePlays('defense', team.schemes, team.defensivePlays),
+  });
 }
 
 function normalizeSchemeUnit(value: unknown): PlayUnit | null {
@@ -461,15 +518,16 @@ app.get('/api/dashboard/:teamId', async (req, res, next) => {
 
     const team = await prisma.team.findUnique({
       where:   { id: teamId },
-      include: { league: true, coaches: true, players: true },
+      include: { league: true, coaches: true, players: true, schemes: true },
     });
     if (!team) return res.status(404).json({ error: 'Team not found' });
+    await ensureDefaultSchemes(teamId);
 
-    const [nextMatch, recentMatch, played, leagueTeams, recentForm, news] = await Promise.all([
+    const [nextMatch, recentMatch, played, leagueTeams, recentForm, news, scheduleWeeks] = await Promise.all([
       prisma.match.findFirst({
         where:   { played: false, OR: [{ homeTeamId: teamId }, { awayTeamId: teamId }] },
         orderBy: { week: 'asc' },
-        include: { homeTeam: true, awayTeam: true },
+        include: { homeTeam: { include: { schemes: true } }, awayTeam: { include: { schemes: true } } },
       }),
       prisma.match.findFirst({
         where:   { played: true,  OR: [{ homeTeamId: teamId }, { awayTeamId: teamId }] },
@@ -480,6 +538,7 @@ app.get('/api/dashboard/:teamId', async (req, res, next) => {
       prisma.team.findMany({  where: { leagueId: team.leagueId }, select: { id: true, name: true } }),
       computeRecentForm(teamId),
       generateNewsFeed(3, team.leagueId),
+      prisma.match.aggregate({ where: { leagueId: team.leagueId }, _max: { week: true } }),
     ]);
 
     const standings  = computeStandings(played, leagueTeams);
@@ -493,7 +552,7 @@ app.get('/api/dashboard/:teamId', async (req, res, next) => {
     const myScore     = recentMatch ? (wasUserHome ? recentMatch.homeScore : recentMatch.awayScore) : 0;
     const oppScore    = recentMatch ? (wasUserHome ? recentMatch.awayScore : recentMatch.homeScore) : 0;
     const oppName     = recentMatch ? (wasUserHome ? recentMatch.awayTeam.name : recentMatch.homeTeam.name) : '';
-    const teamIdentity = deriveTeamIdentity(team);
+    const teamIdentity = identityFromActiveSchemes(team);
     res.json({
       team: {
         id:             team.id,
@@ -508,11 +567,12 @@ app.get('/api/dashboard/:teamId', async (req, res, next) => {
       nextMatch: nextMatch ? {
         id:         nextMatch.id,
         week:       nextMatch.week,
+        totalWeeks: scheduleWeeks._max.week ?? nextMatch.week,
         isHome:     isUserHome,
         opponent: {
           id:           opp!.id,
           name:         opp!.name,
-          identity:     deriveTeamIdentity(opp!),
+          identity:     identityFromActiveSchemes(opp!),
         },
       } : null,
       recentResult: recentMatch ? {
@@ -546,13 +606,13 @@ app.get('/api/team/:teamId/roster', async (req, res, next) => {
 
     const team = await prisma.team.findUnique({
       where:   { id: teamId },
-      include: { players: true, coaches: true },
+      include: { players: true, coaches: true, schemes: true },
     });
     if (!team) return res.status(404).json({ error: 'Team not found' });
     await ensureDefaultSchemes(teamId);
 
     const players = sortByDepth(team.players);
-    const identity = deriveTeamIdentity(team);
+    const identity = identityFromActiveSchemes(team);
 
     const enriched = players.map((player) => ({
       id:        player.id,
@@ -600,6 +660,9 @@ app.get('/api/team/:teamId/roster', async (req, res, next) => {
           developmentSpecialty: coach.developmentSpecialty,
           aggression: coach.aggression,
           reputation: coach.reputation,
+          overall: Math.round((coach.offenseRating + coach.defenseRating) / 2),
+          offenseRating: coach.offenseRating,
+          defenseRating: coach.defenseRating,
           careerWins: coach.careerWins,
           careerLosses: coach.careerLosses,
           titles: coach.titles,
@@ -718,7 +781,20 @@ app.patch('/api/team/:teamId/schemes/:schemeId', async (req, res, next) => {
       data.plays = plays as any;
     }
     if (typeof req.body?.isDefault === 'boolean') data.isDefault = req.body.isDefault;
-    const scheme = await prisma.teamScheme.update({ where: { id: schemeId }, data });
+    const scheme = data.isDefault === true
+      ? await prisma.$transaction(async (tx) => {
+          await tx.teamScheme.updateMany({ where: { teamId, unit, id: { not: schemeId } }, data: { isDefault: false } });
+          return tx.teamScheme.update({ where: { id: schemeId }, data });
+        })
+      : await prisma.teamScheme.update({ where: { id: schemeId }, data });
+    if (scheme.isDefault) {
+      await prisma.team.update({
+        where: { id: teamId },
+        data: unit === 'offense'
+          ? { offensivePlays: normalizePlayLoadout('offense', scheme.plays) as any }
+          : { defensivePlays: normalizePlayLoadout('defense', scheme.plays) as any },
+      });
+    }
     res.json(schemePayload(scheme));
   } catch (e) { next(e); }
 });
@@ -1093,8 +1169,8 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
     const match = await prisma.match.findUnique({
       where:   { id: matchId },
       include: {
-        homeTeam: { include: { players: true, coaches: true } },
-        awayTeam: { include: { players: true, coaches: true } },
+        homeTeam: { include: { players: true, coaches: true, schemes: true } },
+        awayTeam: { include: { players: true, coaches: true, schemes: true } },
       },
     });
     if (!match) return res.status(404).json({ error: 'Match not found' });
@@ -1102,14 +1178,16 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
     const isUserHome = userTeamId === match.homeTeamId;
     const myTeam     = isUserHome ? match.homeTeam : match.awayTeam;
     const opp        = isUserHome ? match.awayTeam : match.homeTeam;
+    const myActiveGameplan = gameplanFromActiveSchemes(myTeam);
+    const oppActiveGameplan = gameplanFromActiveSchemes(opp);
 
     const myProfile: TeamMatchProfile = {
       id:            myTeam.id,
       name:          myTeam.name,
       coaches:       myTeam.coaches,
       players:       startersFromDepth(sortByDepth(myTeam.players)),
-      offensivePlays: normalizePlayLoadout('offense', myTeam.offensivePlays),
-      defensivePlays: normalizePlayLoadout('defense', myTeam.defensivePlays),
+      offensivePlays: myActiveGameplan.offensivePlays,
+      defensivePlays: myActiveGameplan.defensivePlays,
     };
 
     const oppProfile: TeamMatchProfile = {
@@ -1117,8 +1195,8 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
       name:          opp.name,
       coaches:       opp.coaches,
       players:       startersFromDepth(sortByDepth(opp.players)),
-      offensivePlays: normalizePlayLoadout('offense', opp.offensivePlays),
-      defensivePlays: normalizePlayLoadout('defense', opp.defensivePlays),
+      offensivePlays: oppActiveGameplan.offensivePlays,
+      defensivePlays: oppActiveGameplan.defensivePlays,
     };
 
     const recommendation = recommendGameplan(myProfile);
@@ -1144,7 +1222,7 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
       myTeam: {
         id:            myTeam.id,
         name:          myTeam.name,
-        identity:      deriveTeamIdentity(myTeam),
+        identity:      identityFromActiveSchemes(myTeam),
         offensivePhilosophy: myTeam.offensivePhilosophy,
         offenseRating: myTeam.offenseRating,
         defenseRating: myTeam.defenseRating,
@@ -1152,7 +1230,7 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
       opponent: {
         id:            opp.id,
         name:          opp.name,
-        identity:      deriveTeamIdentity(opp),
+        identity:      identityFromActiveSchemes(opp),
         offensivePhilosophy: opp.offensivePhilosophy,
         offenseRating: opp.offenseRating,
         defenseRating: opp.defenseRating,
@@ -1245,13 +1323,14 @@ app.get('/api/league/:leagueId/standings', async (req, res, next) => {
         include: {
           coaches: true,
           players: true,
+          schemes: true,
         },
       }),
       prisma.league.findUnique({ where: { id: leagueId } }),
     ]);
     const standings = computeStandings(played, teams.map((t) => ({ id: t.id, name: t.name })));
     const styleByTeam = new Map(teams.map((t) => [t.id, {
-      identity: deriveTeamIdentity(t),
+      identity: identityFromActiveSchemes(t),
       coaches: t.coaches
         .filter((coach) => ['HEAD_COACH', 'OC', 'DC'].includes(coach.role))
         .map((coach) => ({

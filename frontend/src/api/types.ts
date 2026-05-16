@@ -103,9 +103,10 @@ export interface DashboardResponse {
     leagueTier:    number;
   };
   nextMatch: {
-    id:     string;
-    week:   number;
-    isHome: boolean;
+    id:         string;
+    week:       number;
+    totalWeeks: number;
+    isHome:     boolean;
     opponent: {
       id:           string;
       name:         string;
@@ -253,6 +254,9 @@ export interface RosterResponse {
       developmentSpecialty: string;
       aggression:           number;
       reputation:           number;
+      overall:              number;
+      offenseRating:        number;
+      defenseRating:        number;
       careerWins:           number;
       careerLosses:         number;
       titles:               number;
@@ -286,6 +290,9 @@ export interface CoachMarketResponse {
     developmentSpecialty: string;
     aggression:           number;
     reputation:           number;
+    overall:              number;
+    offenseRating:        number;
+    defenseRating:        number;
     careerWins:           number;
     careerLosses:         number;
     titles:               number;

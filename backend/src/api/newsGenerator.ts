@@ -12,6 +12,7 @@ export interface NewsItem {
 type NewsDraft = NewsItem & { sourceTeamName: string; score?: number };
 
 const SOURCE_SUFFIXES = ['Guardian', 'Tribune', 'Ledger', 'Herald', 'Post'];
+const NEWS_TEXT_LIMIT = 90;
 
 // Generate a small, narrative-flavored news feed from recent played matches.
 // Emphasizes "alive world" feel inside the user's current league.
@@ -37,7 +38,7 @@ export async function generateNewsFeed(limit = 3, leagueId?: string): Promise<Ne
     },
   });
 
-  if (matches.length === 0) return [];
+  if (matches.length === 0) return generatePreseasonNews(limit, leagueId);
 
   // Sort options into pools
   const items: NewsDraft[] = [];
@@ -136,6 +137,91 @@ export async function generateNewsFeed(limit = 3, leagueId?: string): Promise<Ne
   return pickWeeklySelection(weeklyPool, latestWeek, leagueId, limit);
 }
 
+async function generatePreseasonNews(limit: number, leagueId: string | undefined): Promise<NewsItem[]> {
+  const teams = await prisma.team.findMany({
+    where: leagueId ? { leagueId } : undefined,
+    include: {
+      league: true,
+      coaches: true,
+      players: true,
+    },
+  });
+
+  if (teams.length === 0) return [];
+
+  const week = 1;
+  const items: NewsDraft[] = [];
+  const titleFavorite = [...teams]
+    .sort((a, b) => (b.offenseRating + b.defenseRating) - (a.offenseRating + a.defenseRating))[0];
+
+  if (titleFavorite) {
+    items.push(withSource({
+      headline: `${titleFavorite.name} set the Week 1 standard`,
+      summary: `${titleFavorite.league.name}'s top-rated roster opens as the team to chase.`,
+      category: 'STANDINGS',
+      week,
+      leagueName: titleFavorite.league.name,
+    }, titleFavorite.name, leagueId));
+  }
+
+  const identityCoach = teams
+    .flatMap((team) => team.coaches
+      .filter((coach) => coach.role === 'OC' || coach.role === 'DC')
+      .map((coach) => ({ team, coach })))
+    .sort((a, b) => b.coach.reputation - a.coach.reputation)[0];
+
+  if (identityCoach) {
+    const side = identityCoach.coach.role === 'OC' ? 'offense' : 'defense';
+    items.push(withSource({
+      headline: `${identityCoach.team.name} lean into ${identityCoach.coach.philosophy}`,
+      summary: `${identityCoach.coach.name}'s ${side} gives them a clear Week 1 identity.`,
+      category: 'COACH',
+      week,
+      leagueName: identityCoach.team.league.name,
+    }, identityCoach.team.name, leagueId));
+  }
+
+  const playerWatch = teams
+    .flatMap((team) => team.players.map((player) => ({ team, player })))
+    .sort((a, b) => {
+      const contractScore = Number(b.player.contractYearsLeft === 1) - Number(a.player.contractYearsLeft === 1);
+      return contractScore || b.player.overall - a.player.overall;
+    })[0];
+
+  if (playerWatch) {
+    const contractNote = playerWatch.player.contractYearsLeft === 1
+      ? 'with a contract call looming'
+      : 'with expectations climbing';
+    items.push(withSource({
+      headline: `${playerWatch.player.name} headlines Week 1 watch list`,
+      summary: `${playerWatch.team.name}'s ${playerWatch.player.overall}-rated ${playerWatch.player.position} opens ${contractNote}.`,
+      category: 'PLAYER',
+      week,
+      leagueName: playerWatch.team.league.name,
+    }, playerWatch.team.name, leagueId));
+  }
+
+  if (items.length < limit) {
+    const opener = await prisma.match.findFirst({
+      where: leagueId ? { leagueId, week: 1 } : { week: 1 },
+      include: { homeTeam: { include: { league: true } }, awayTeam: true },
+      orderBy: { id: 'asc' },
+    });
+
+    if (opener) {
+      items.push(withSource({
+        headline: `${opener.homeTeam.name} host ${opener.awayTeam.name} in Week 1 opener`,
+        summary: `The schedule starts with an early tone-setter in ${opener.homeTeam.league.name}.`,
+        category: 'STANDINGS',
+        week,
+        leagueName: opener.homeTeam.league.name,
+      }, opener.homeTeam.name, leagueId));
+    }
+  }
+
+  return pickWeeklySelection(items, week, leagueId, limit);
+}
+
 function withSource(item: NewsItem, sourceTeamName: string, leagueId: string | undefined): NewsDraft {
   const sourceName = sourceNameForTeam(sourceTeamName, item.week, leagueId, item.category);
   return { ...item, sourceName, sourceTeamName };
@@ -186,7 +272,16 @@ function assignUniqueSource(item: NewsDraft, index: number, week: number, league
 
 function stripDraftFields(item: NewsDraft): NewsItem {
   const { sourceTeamName: _sourceTeamName, score: _score, ...newsItem } = item;
-  return newsItem;
+  return {
+    ...newsItem,
+    headline: limitNewsText(newsItem.headline),
+    summary:  limitNewsText(newsItem.summary),
+  };
+}
+
+function limitNewsText(value: string): string {
+  if (value.length <= NEWS_TEXT_LIMIT) return value;
+  return value.slice(0, NEWS_TEXT_LIMIT).trimEnd();
 }
 
 function newsPriority(category: NewsItem['category']): number {

@@ -3,6 +3,16 @@ import { generateRoundRobin } from './scheduleGenerator';
 import { finalizeCurrentSeason } from './seasonHistory';
 import { computeLeagueAwards, LeagueAwards } from './awards';
 import { runLeaguePlayoffs, LeaguePlayoffBracket } from './playoffs';
+import {
+  defenseStyleForCoachPhilosophy,
+  defensiveIdentityForStyle,
+  offenseStyleForCoachPhilosophy,
+  offensiveIdentityForStyle,
+  pickDefensiveCoachPhilosophy,
+  pickHeadCoachPhilosophy,
+  pickOffensiveCoachPhilosophy,
+} from './coachPhilosophy';
+import { deriveTeamIdentity, TeamIdentity } from './teamIdentity';
 
 interface Movement {
   teamId: string;
@@ -324,11 +334,10 @@ async function applyCoachMovement(histories: Array<{ teamId: string; teamName: s
     const history = historyByTeam.get(team.id);
     for (const coach of team.coaches) {
       const shouldRetire = coach.age >= 67 && coach.reputation >= 70;
-      const shouldFire = coach.role === 'HEAD_COACH' && coach.hotSeat >= 78;
-      if (!shouldRetire && !shouldFire) continue;
+      if (!shouldRetire) continue;
 
-      const reason: CoachMove['reason'] = shouldRetire ? 'RETIRED' : 'FIRED';
-      const replacement = buildReplacementCoach(team.id, coach.role, team.offenseStyle, team.defenseStyle);
+      const reason: CoachMove['reason'] = 'RETIRED';
+      const replacement = buildReplacementCoach(team.id, coach.role, team.offenseStyle, team.defenseStyle, deriveTeamIdentity(team));
       await prisma.coach.delete({ where: { id: coach.id } });
       const incoming = await prisma.coach.create({ data: replacement as any });
       moves.push({
@@ -349,14 +358,8 @@ async function applyCoachIdentityToTeams(): Promise<void> {
   for (const team of teams) {
     const oc = team.coaches.find((coach) => coach.role === 'OC');
     const dc = team.coaches.find((coach) => coach.role === 'DC');
-    const offenseStyle =
-      oc?.philosophy.includes('Vertical') ? 'PASS_HEAVY' :
-      oc?.philosophy.includes('Ground') ? 'RUN_HEAVY' :
-      team.offenseStyle;
-    const defenseStyle =
-      dc?.philosophy.includes('Pressure') ? 'AGGRESSIVE' :
-      dc?.philosophy.includes('Coverage') ? 'PREVENT' :
-      team.defenseStyle;
+    const offenseStyle = oc ? offenseStyleForCoachPhilosophy(oc.philosophy) ?? team.offenseStyle : team.offenseStyle;
+    const defenseStyle = dc ? defenseStyleForCoachPhilosophy(dc.philosophy) ?? team.defenseStyle : team.defenseStyle;
     await prisma.team.update({
       where: { id: team.id },
       data: {
@@ -425,24 +428,36 @@ function playerDevelopmentGroup(position: string): string {
   return 'Skill';
 }
 
-function buildReplacementCoach(teamId: string, role: string, offenseStyle: string, defenseStyle: string) {
+function buildReplacementCoach(teamId: string, role: string, offenseStyle: string, defenseStyle: string, identity?: TeamIdentity) {
+  const offensiveIdentity = identity?.offense ?? offensiveIdentityForStyle(offenseStyle);
+  const defensiveIdentity = identity?.defense ?? defensiveIdentityForStyle(defenseStyle);
   const specialty =
     role === 'OC' ? (offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : 'Skill') :
     role === 'DC' ? (defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? 'DL' : 'LB') :
     ['QB', 'Skill', 'OL', 'DL', 'LB', 'Secondary'][Math.floor(Math.random() * 6)];
+  const baseRating = 50 + Math.floor(Math.random() * 20);
+  const offenseRating =
+    role === 'OC' ? Math.min(100, baseRating + 4 + Math.floor(Math.random() * 8)) :
+    role === 'DC' ? Math.max(0, baseRating - 4 - Math.floor(Math.random() * 8)) :
+    Math.max(0, Math.min(100, baseRating + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
+  const defenseRating =
+    role === 'DC' ? Math.min(100, baseRating + 4 + Math.floor(Math.random() * 8)) :
+    role === 'OC' ? Math.max(0, baseRating - 4 - Math.floor(Math.random() * 8)) :
+    Math.max(0, Math.min(100, baseRating + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
   return {
     name: `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`,
     role,
     philosophy:
-      role === 'OC' && offenseStyle === 'PASS_HEAVY' ? 'Vertical Architect' :
-      role === 'OC' && offenseStyle === 'RUN_HEAVY' ? 'Ground Game Designer' :
-      role === 'DC' && defenseStyle === 'AGGRESSIVE' ? 'Pressure Merchant' :
-      role === 'DC' && defenseStyle === 'PREVENT' ? 'Coverage Professor' :
-      role === 'HEAD_COACH' ? 'Program Stabilizer' :
+      role === 'OC' ? pickOffensiveCoachPhilosophy(offensiveIdentity) :
+      role === 'DC' ? pickDefensiveCoachPhilosophy(defensiveIdentity) :
+      role === 'HEAD_COACH' ? pickHeadCoachPhilosophy(offenseRating, defenseRating) :
       'Balanced Playcaller',
     developmentSpecialty: specialty,
     aggression: defenseStyle === 'AGGRESSIVE' ? 76 : offenseStyle === 'PASS_HEAVY' ? 70 : 52,
     reputation: 42 + Math.floor(Math.random() * 24),
+    overall: Math.round((offenseRating + defenseRating) / 2),
+    offenseRating,
+    defenseRating,
     hotSeat: 18 + Math.floor(Math.random() * 18),
     yearsWithTeam: 1,
     age: 34 + Math.floor(Math.random() * 22),

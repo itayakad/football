@@ -1,26 +1,42 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { ScreenContainer } from '../components/ScreenContainer';
 import { Card } from '../components/Card';
 import { SectionLabel } from '../components/SectionLabel';
-import { FormDots } from '../components/FormDots';
 import { api } from '../api/client';
 import { useUserTeamId } from '../state/userTeam';
 import { colors, spacing, typography, radius } from '../theme';
 import { RootStackParamList } from '../navigation/types';
+import { NewsItem, TeamIdentity } from '../api/types';
+import { teamArchetypeLabel } from '../utils/teamArchetype';
+
+const NEWS_CARD_HEIGHT = 174;
+const NEWS_REPEAT_COUNT = 7;
+const NEWS_REPEAT_MIDDLE = Math.floor(NEWS_REPEAT_COUNT / 2);
+const EMPTY_NEWS: NewsItem[] = [];
+
+type IconName = keyof typeof Ionicons.glyphMap;
 
 export const HomeScreen: React.FC = () => {
   const userTeamId = useUserTeamId();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const newsWheelRef = React.useRef<ScrollView>(null);
+  const [activeNewsIndex, setActiveNewsIndex] = React.useState(0);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', userTeamId],
     queryFn: () => api.dashboard(userTeamId!),
     enabled: !!userTeamId,
   });
+  const dashboardNews = data?.news ?? EMPTY_NEWS;
+  const repeatedNews = React.useMemo(
+    () => (dashboardNews.length > 0 ? Array.from({ length: NEWS_REPEAT_COUNT }, () => dashboardNews).flat() : []),
+    [dashboardNews],
+  );
 
   // Auto-refetch on focus so next-match updates after a sim
   React.useEffect(() => {
@@ -28,9 +44,40 @@ export const HomeScreen: React.FC = () => {
     return unsub;
   }, [navigation, refetch]);
 
+  React.useEffect(() => {
+    setActiveNewsIndex(0);
+    if (dashboardNews.length < 2) return;
+
+    requestAnimationFrame(() => {
+      newsWheelRef.current?.scrollTo({
+        y: NEWS_REPEAT_MIDDLE * dashboardNews.length * NEWS_CARD_HEIGHT,
+        animated: false,
+      });
+    });
+  }, [dashboardNews]);
+
+  const handleNewsMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (dashboardNews.length === 0) return;
+
+    const rawIndex = Math.round(event.nativeEvent.contentOffset.y / NEWS_CARD_HEIGHT);
+    const nextIndex = ((rawIndex % dashboardNews.length) + dashboardNews.length) % dashboardNews.length;
+    setActiveNewsIndex(nextIndex);
+
+    if (dashboardNews.length < 2) return;
+
+    const lowerResetPoint = dashboardNews.length;
+    const upperResetPoint = dashboardNews.length * (NEWS_REPEAT_COUNT - 1);
+    if (rawIndex <= lowerResetPoint || rawIndex >= upperResetPoint) {
+      newsWheelRef.current?.scrollTo({
+        y: (NEWS_REPEAT_MIDDLE * dashboardNews.length + nextIndex) * NEWS_CARD_HEIGHT,
+        animated: false,
+      });
+    }
+  };
+
   if (!userTeamId || isLoading) {
     return (
-      <ScreenContainer>
+      <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
         <ActivityIndicator color={colors.accent.primary} style={{ marginTop: spacing.xxxl }} />
       </ScreenContainer>
     );
@@ -38,25 +85,30 @@ export const HomeScreen: React.FC = () => {
 
   if (error || !data) {
     return (
-      <ScreenContainer>
+      <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
         <Text style={typography.body}>Failed to load dashboard. Is the backend running?</Text>
       </ScreenContainer>
     );
   }
 
-  const { team, nextMatch, recentResult, standingsPosition, recentForm, news } = data;
+  const { team, nextMatch, news } = data;
 
   return (
-    <ScreenContainer>
-      {/* ── Team Header ──────────────────────────────────── */}
-      <View>
-        <View style={styles.headerRow}>
-          <Text style={typography.label}>{team.leagueName}</Text>
-          {recentForm.lastResults.length > 0 && (
-            <FormDots results={recentForm.lastResults} streak={recentForm.streak} />
-          )}
+    <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
+      {/* ── Team Banner ──────────────────────────────────── */}
+      <View style={styles.bannerRow}>
+        <View style={styles.teamBanner}>
+          <Text style={styles.bannerTeamName} numberOfLines={1}>{team.name}</Text>
+          <Text style={styles.bannerLeague} numberOfLines={1}>{team.leagueName}</Text>
         </View>
-        <Text style={[typography.display, { marginTop: spacing.xs }]}>{team.name}</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          onPress={() => navigation.navigate('Settings')}
+          style={({ pressed }) => [styles.settingsButton, pressed && styles.actionButtonPressed]}
+        >
+          <Ionicons name="settings-outline" size={22} color={colors.text.primary} />
+        </Pressable>
       </View>
 
       {/* ── Primary Action: Next Match ───────────────────── */}
@@ -66,14 +118,25 @@ export const HomeScreen: React.FC = () => {
           style={({ pressed }) => [styles.matchButton, pressed && styles.actionButtonPressed]}
         >
           <View style={styles.matchButtonTopRow}>
-            <Text style={styles.matchButtonLabel}>
-              {`Week ${nextMatch.week} · ${nextMatch.isHome ? 'Home' : 'Away'}`}
-            </Text>
+            <View style={styles.matchButtonMeta}>
+              <Text style={styles.matchButtonLabel}>
+                {`Week ${nextMatch.week} / ${nextMatch.totalWeeks}`}
+              </Text>
+            </View>
             <Text style={styles.actionArrowLight}>→</Text>
           </View>
-          <Text style={styles.matchButtonOpponent}>
-            {nextMatch.isHome ? 'vs' : '@'} {nextMatch.opponent.name}
-          </Text>
+          <View style={styles.matchButtonBody}>
+            <View style={styles.opponentMark}>
+              <Text style={styles.opponentInitial}>{nextMatch.opponent.name.slice(0, 1)}</Text>
+            </View>
+            <View style={styles.matchButtonCopy}>
+              <Text style={styles.matchButtonVersus}>{nextMatch.isHome ? 'vs' : '@'} Opponent</Text>
+              <Text style={styles.matchButtonOpponent} numberOfLines={1}>
+                {nextMatch.opponent.name}
+              </Text>
+              <OpponentIdentity identity={nextMatch.opponent.identity} />
+            </View>
+          </View>
         </Pressable>
       ) : (
         <Card>
@@ -82,82 +145,108 @@ export const HomeScreen: React.FC = () => {
       )}
 
       {/* ── Nav Buttons ─────────────────────────────────── */}
-      <View style={styles.actionRow}>
-        <NavButton label="Team"   onPress={() => navigation.navigate('Team')} />
-        <NavButton label="League" onPress={() => navigation.navigate('League')} />
-      </View>
-
-      {/* ── Two-up: Standings + Last Result ──────────────── */}
-      <View style={styles.twoUp}>
-        <Pressable
-          style={({ pressed }) => [styles.halfCardPressable, pressed && styles.cardPressed]}
-          onPress={() => navigation.navigate('League')}
-        >
-          <Card style={styles.halfCard}>
-            <SectionLabel>Standings</SectionLabel>
-            <Text style={typography.title}>
-              {standingsPosition.rank != null ? String(standingsPosition.rank) : '—'}
-              <Text style={typography.caption}>{` / ${standingsPosition.total}`}</Text>
-            </Text>
-            <Text style={typography.caption}>
-              {standingsPosition.wins}-{standingsPosition.losses}
-              {standingsPosition.ties > 0 ? `-${standingsPosition.ties}` : ''}
-            </Text>
-          </Card>
-        </Pressable>
-
-        <Card style={styles.halfCard}>
-          <SectionLabel>Last Week</SectionLabel>
-          {recentResult ? (
-            <>
-              <Text style={[typography.title, {
-                color: recentResult.result === 'W' ? colors.success
-                     : recentResult.result === 'L' ? colors.danger
-                     : colors.text.secondary
-              }]}>
-                {recentResult.result} {recentResult.myScore}–{recentResult.theirScore}
-              </Text>
-              <Text style={typography.caption} numberOfLines={1}>
-                vs {recentResult.opponentName}
-              </Text>
-            </>
-          ) : (
-            <Text style={typography.caption}>No matches played yet.</Text>
-          )}
-        </Card>
+      <View style={styles.actionGrid}>
+        <NavButton label="Team" icon="shirt-outline" onPress={() => navigation.navigate('Team')} />
+        <NavButton label="League" icon="trophy-outline" onPress={() => navigation.navigate('League')} />
+        <NavButton label="Stadium" icon="business-outline" onPress={() => navigation.navigate('Stadium')} />
+        <NavButton label="Friends" icon="people-outline" onPress={() => navigation.navigate('Friends')} />
       </View>
 
       {/* ── League News ─────────────────────────────────── */}
       {news && news.length > 0 && (
-        <View>
-          <SectionLabel>Around the League</SectionLabel>
-          {news.map((item, idx) => (
-            <Card key={idx} style={styles.newsCard}>
-              <View style={styles.newsRow}>
-                <View style={[styles.newsCategoryDot, { backgroundColor: newsCategoryColor(item.category) }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={[typography.body, { fontWeight: '600' }]} numberOfLines={2}>
-                    {item.headline}
-                  </Text>
-                  <Text style={[typography.caption, { marginTop: spacing.xs }]} numberOfLines={2}>
-                    {item.summary}
-                  </Text>
-                  {item.leagueName && (
-                    <Text style={[typography.label, { marginTop: spacing.xs, fontSize: 10 }]}>
-                      {item.sourceName}
-                    </Text>
-                  )}
+        <View style={styles.newsSection}>
+          <View style={styles.newsHeaderRow}>
+            <SectionLabel>Around the League</SectionLabel>
+            <Text style={styles.newsCounter}>{activeNewsIndex + 1}/{news.length}</Text>
+          </View>
+          <View style={styles.newsWheel}>
+            <ScrollView
+              ref={newsWheelRef}
+              pagingEnabled
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+              snapToInterval={NEWS_CARD_HEIGHT}
+              decelerationRate="fast"
+              onMomentumScrollEnd={handleNewsMomentumEnd}
+            >
+              {(news.length > 1 ? repeatedNews : news).map((item, idx) => (
+                <View key={`${item.headline}-${idx}`} style={styles.newsPage}>
+                  <NewsStory item={item} />
                 </View>
-              </View>
-            </Card>
-          ))}
+              ))}
+            </ScrollView>
+          </View>
+          {news.length > 1 && (
+            <View style={styles.newsDots}>
+              {news.map((_, idx) => (
+                <View
+                  key={idx}
+                  style={[
+                    styles.newsDot,
+                    idx === activeNewsIndex && styles.newsDotActive,
+                  ]}
+                />
+              ))}
+            </View>
+          )}
         </View>
       )}
     </ScreenContainer>
   );
 };
 
-function NavButton({ label, onPress }: { label: string; onPress: () => void }) {
+function NewsStory({ item }: { item: NewsItem }) {
+  return (
+    <Card style={styles.newsCard}>
+      <View style={styles.newsRow}>
+        <View style={[styles.newsCategoryDot, { backgroundColor: newsCategoryColor(item.category) }]} />
+        <View style={styles.newsCopy}>
+          <Text style={styles.newsHeadline} numberOfLines={2}>
+            {item.headline}
+          </Text>
+          <Text style={styles.newsSummary} numberOfLines={3}>
+            {item.summary}
+          </Text>
+          {(item.sourceName || item.leagueName) && (
+            <Text style={styles.newsSource} numberOfLines={1}>
+              {item.sourceName ?? item.leagueName}
+            </Text>
+          )}
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+function OpponentIdentity({ identity }: { identity: TeamIdentity }) {
+  return (
+    <View style={styles.opponentIdentityRow}>
+      <Text style={styles.opponentArchetype} numberOfLines={1}>
+        {teamArchetypeLabel(identity)}
+      </Text>
+      <View style={styles.opponentIdentityIcons}>
+        <IdentityIcon
+          icon={offenseIdentityIcon(identity.offense)}
+          color={offenseIdentityColor(identity.offense)}
+        />
+        <IdentityIcon
+          icon={defenseIdentityIcon(identity.defense)}
+          color={defenseIdentityColor(identity.defense)}
+        />
+      </View>
+    </View>
+  );
+}
+
+function IdentityIcon({ icon, color }: { icon: IconName; color: string }) {
+  return (
+    <View style={styles.identityIcon}>
+      <Ionicons name={icon} size={13} color={color} />
+    </View>
+  );
+}
+
+function NavButton({ label, icon, onPress }: { label: string; icon: IconName; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
@@ -168,13 +257,59 @@ function NavButton({ label, onPress }: { label: string; onPress: () => void }) {
       ]}
     >
       <View style={styles.actionTopRow}>
-        <Text style={[styles.actionLabel, styles.actionLabelActive]}>
-          {label}
-        </Text>
+        <View style={styles.actionIconWrap}>
+          <Ionicons name={icon} size={20} color={colors.text.primary} />
+        </View>
         <Text style={styles.actionArrow}>→</Text>
       </View>
+      <Text style={[styles.actionLabel, styles.actionLabelActive]}>
+        {label}
+      </Text>
     </Pressable>
   );
+}
+
+function offenseIdentityIcon(identity: TeamIdentity['offense']): IconName {
+  switch (identity) {
+    case 'VERTICAL':   return 'trending-up';
+    case 'RUN_HEAVY':  return 'footsteps';
+    case 'PASS_HEAVY': return 'paper-plane';
+    case 'BALANCED':   return 'git-branch';
+  }
+}
+
+function defenseIdentityIcon(identity: TeamIdentity['defense']): IconName {
+  switch (identity) {
+    case 'PRESSURE':   return 'flash';
+    case 'MAN_HEAVY':  return 'person';
+    case 'ZONE_HEAVY': return 'grid';
+    case 'BALANCED':   return 'shield-checkmark';
+  }
+}
+
+function offenseIdentityColor(identity: TeamIdentity['offense']): string {
+  switch (identity) {
+    case 'VERTICAL':
+    case 'PASS_HEAVY':
+      return colors.identity.pass;
+    case 'RUN_HEAVY':
+      return colors.identity.run;
+    case 'BALANCED':
+      return colors.identity.bal;
+  }
+}
+
+function defenseIdentityColor(identity: TeamIdentity['defense']): string {
+  switch (identity) {
+    case 'PRESSURE':
+      return colors.identity.agg;
+    case 'MAN_HEAVY':
+      return colors.identity.man;
+    case 'ZONE_HEAVY':
+      return colors.identity.zone;
+    case 'BALANCED':
+      return colors.identity.bal;
+  }
 }
 
 function newsCategoryColor(category: string): string {
@@ -191,13 +326,70 @@ function newsCategoryColor(category: string): string {
 }
 
 const styles = StyleSheet.create({
-  headerRow: {
+  fixedContent: {
+    paddingTop: spacing.lg,
+    gap:        spacing.lg,
+  },
+  bannerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems:    'center',
+    gap:           spacing.md,
+  },
+  teamBanner: {
+    flex:              1,
+    minHeight:         94,
+    borderRadius:      radius.lg,
+    backgroundColor:   colors.bg.elevated,
+    borderWidth:       1,
+    borderColor:       colors.border,
+    paddingVertical:   spacing.lg,
+    paddingHorizontal: spacing.lg,
+    justifyContent:    'center',
+  },
+  bannerTeamName: {
+    ...typography.title,
+    color: colors.text.primary,
+  },
+  bannerLeague: {
+    ...typography.label,
+    color:     colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+  settingsButton: {
+    width:           52,
+    height:          52,
+    borderRadius:    26,
+    backgroundColor: colors.bg.elevated,
+    borderWidth:     1,
+    borderColor:     colors.border,
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
+  newsSection: {
+    flex: 1,
+    minHeight: 0,
+  },
+  newsHeaderRow: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    marginBottom:   spacing.sm,
+  },
+  newsCounter: {
+    ...typography.label,
+    color: colors.text.secondary,
+  },
+  newsWheel: {
+    height:        NEWS_CARD_HEIGHT,
+    borderRadius: radius.lg,
+    overflow:     'hidden',
+  },
+  newsPage: {
+    height: NEWS_CARD_HEIGHT,
   },
   newsCard: {
-    marginBottom: spacing.sm,
+    height:         NEWS_CARD_HEIGHT,
+    justifyContent: 'center',
   },
   newsRow: {
     flexDirection: 'row',
@@ -210,31 +402,54 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     marginTop:    7,
   },
-  twoUp: {
-    flexDirection: 'row',
-    gap:           spacing.md,
-  },
-  halfCard: {
+  newsCopy: {
     flex: 1,
   },
-  halfCardPressable: {
-    flex: 1,
+  newsHeadline: {
+    ...typography.body,
+    color:      colors.text.primary,
+    fontWeight: '700',
   },
-  cardPressed: {
-    opacity: 0.85,
+  newsSummary: {
+    ...typography.caption,
+    color:     colors.text.secondary,
+    marginTop: spacing.xs,
   },
-  actionRow: {
+  newsSource: {
+    ...typography.label,
+    color:     colors.text.muted,
+    fontSize:  10,
+    marginTop: spacing.xs,
+  },
+  newsDots: {
+    flexDirection:  'row',
+    justifyContent: 'center',
+    gap:            spacing.xs,
+    marginTop:      spacing.sm,
+  },
+  newsDot: {
+    width:           5,
+    height:          5,
+    borderRadius:    3,
+    backgroundColor: colors.text.muted,
+  },
+  newsDotActive: {
+    width:           16,
+    backgroundColor: colors.accent.primary,
+  },
+  actionGrid: {
     flexDirection: 'row',
+    flexWrap:      'wrap',
     gap:           spacing.sm,
   },
   actionButton: {
-    flex:            1,
-    minHeight:       64,
-    borderRadius:    radius.md,
-    paddingVertical: spacing.md,
+    width:             '48.6%',
+    minHeight:         72,
+    borderRadius:      radius.md,
+    paddingVertical:   spacing.md,
     paddingHorizontal: spacing.md,
-    gap:             spacing.xs,
-    justifyContent:  'center',
+    gap:               spacing.xs,
+    justifyContent:    'space-between',
   },
   actionButtonActive: {
     backgroundColor: colors.accent.primary,
@@ -248,8 +463,16 @@ const styles = StyleSheet.create({
     alignItems:     'center',
     justifyContent: 'space-between',
   },
+  actionIconWrap: {
+    width:           30,
+    height:          30,
+    borderRadius:    15,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
   actionLabel: {
-    fontSize:      18,
+    fontSize:      16,
     fontWeight:    '800',
     letterSpacing: 0.4,
   },
@@ -270,7 +493,9 @@ const styles = StyleSheet.create({
     backgroundColor:   colors.accent.primary,
     borderRadius:      radius.lg,
     padding:           spacing.lg,
-    gap:               spacing.sm,
+    minHeight:         156,
+    gap:               spacing.md,
+    justifyContent:    'space-between',
   },
   matchButtonTopRow: {
     flexDirection:  'row',
@@ -281,8 +506,72 @@ const styles = StyleSheet.create({
     ...typography.label,
     color: 'rgba(255,255,255,0.78)',
   },
+  matchButtonMeta: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           spacing.xs,
+  },
+  matchButtonBody: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           spacing.md,
+  },
+  opponentMark: {
+    width:           60,
+    height:          60,
+    borderRadius:    18,
+    backgroundColor: 'rgba(11,12,14,0.28)',
+    borderWidth:     1,
+    borderColor:     'rgba(255,255,255,0.18)',
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
+  opponentInitial: {
+    fontSize:   28,
+    fontWeight: '900',
+    color:      colors.text.primary,
+  },
+  matchButtonCopy: {
+    flex: 1,
+  },
+  matchButtonVersus: {
+    ...typography.label,
+    color:        'rgba(255,255,255,0.72)',
+    marginBottom: spacing.xs,
+  },
   matchButtonOpponent: {
     ...typography.title,
     color: colors.text.primary,
+  },
+  opponentIdentityRow: {
+    flexDirection:   'row',
+    alignItems:      'center',
+    alignSelf:       'flex-start',
+    maxWidth:        '100%',
+    gap:             spacing.sm,
+    marginTop:       spacing.sm,
+    borderRadius:    radius.pill,
+    backgroundColor: 'rgba(11,12,14,0.28)',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  opponentArchetype: {
+    ...typography.label,
+    flexShrink: 1,
+    color:      colors.text.primary,
+    fontSize:   11,
+  },
+  opponentIdentityIcons: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           spacing.xs,
+  },
+  identityIcon: {
+    width:          22,
+    height:         22,
+    borderRadius:   11,
+    alignItems:     'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
 });
