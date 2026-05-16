@@ -92,7 +92,23 @@ const TEAMS_BY_TIER: Record<number, Array<{
   ],
 };
 
-// 38 players per team. Mirrors a compressed 53-man NFL roster (no special teams).
+// Formation minimums plus at least one backup at every position.
+// This is the current roster safety rule until cutting/offseason roster management
+// gets a fuller contract.
+const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
+  QB: 1,
+  RB: 2,
+  WR: 3,
+  TE: 1,
+  OL: 5,
+  DE: 2,
+  DT: 2,
+  LB: 3,
+  CB: 3,
+  S:  2,
+};
+
+// 39 players per team. Mirrors a compressed 53-man NFL roster (no special teams).
 const POSITION_DISTRIBUTION = [
   { position: 'QB',  count: 2 },
   { position: 'RB',  count: 4 },
@@ -103,8 +119,15 @@ const POSITION_DISTRIBUTION = [
   { position: 'DT',  count: 3 },
   { position: 'LB',  count: 5 },
   { position: 'CB',  count: 4 },
-  { position: 'S',   count: 2 },
-]; // total = 38
+  { position: 'S',   count: 3 },
+]; // total = 39
+
+for (const { position, count } of POSITION_DISTRIBUTION) {
+  const minimum = (STARTER_COUNTS_BY_POSITION[position] ?? 1) + 1;
+  if (count < minimum) {
+    throw new Error(`POSITION_DISTRIBUTION requires at least ${minimum} ${position} players per team`);
+  }
+}
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -127,6 +150,16 @@ function randomCoachName(): string {
 }
 
 // Age curve: young players are rawer, veterans are settled.
+// Split an overall into two stored stats (high/low) such that their average
+// reconstructs the overall. Variance is randomized so two 70-OVR players don't
+// look identical on the card.
+export function splitOverallIntoStats(overall: number): { statHigh: number; statLow: number } {
+  const delta = randomInt(0, 6);
+  const statHigh = Math.max(35, Math.min(99, overall + delta));
+  const statLow  = Math.max(35, Math.min(99, overall - delta));
+  return { statHigh, statLow };
+}
+
 export function generateOverall(age: number, tier: number): number {
   const [min, max]: [number, number] = tier === 1 ? [74, 92] : tier === 2 ? [62, 80] : [50, 68];
   const base = randomInt(min, max);
@@ -195,6 +228,7 @@ export async function seedWorld(): Promise<void> {
 
   const playerData: Array<{
     name: string; position: string; overall: number;
+    statHigh: number; statLow: number;
     potential: number; age: number; teamId: string;
     salary: number; contractYearsLeft: number; extensionEligible: boolean;
   }> = [];
@@ -204,10 +238,13 @@ export async function seedWorld(): Promise<void> {
       for (let i = 0; i < count; i++) {
         const age     = randomInt(21, 35);
         const overall = generateOverall(age, team.tier);
+        const { statHigh, statLow } = splitOverallIntoStats(overall);
         playerData.push({
           name:      randomName(),
           position,
-          overall,
+          overall:   Math.round((statHigh + statLow) / 2),
+          statHigh,
+          statLow,
           potential: generatePotential(age, overall),
           age,
           teamId:    team.id,

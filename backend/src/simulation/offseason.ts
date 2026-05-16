@@ -257,7 +257,10 @@ async function applyProgressionAndContracts(): Promise<Progression> {
       player.age >= 30 ? -1 :
       0;
     const delta = Math.max(-4, Math.min(4, growth + (player.age <= 26 ? specialtyBoost : 0)));
-    const overall = Math.max(35, Math.min(player.potential, player.overall + delta));
+    const cap = player.potential;
+    const statHigh = Math.max(35, Math.min(cap, player.statHigh + delta));
+    const statLow  = Math.max(35, Math.min(cap, player.statLow  + delta));
+    const overall = Math.round((statHigh + statLow) / 2);
     if (overall > player.overall) improved++;
     if (overall < player.overall) declined++;
 
@@ -266,6 +269,8 @@ async function applyProgressionAndContracts(): Promise<Progression> {
     await prisma.player.update({
       where: { id: player.id },
       data: {
+        statHigh,
+        statLow,
         overall,
         contractYearsLeft: shouldList ? 1 : yearsLeft,
         extensionEligible: shouldList || player.age >= 27 || overall >= 82,
@@ -403,11 +408,16 @@ async function createRookie(teamId: string, position: string): Promise<void> {
   const base = ['QB', 'WR', 'CB', 'DE'].includes(position) ? 60 : 57;
   const overall = base + Math.floor(Math.random() * 8);
   const potential = Math.min(92, overall + 10 + Math.floor(Math.random() * 14));
+  const delta = Math.floor(Math.random() * 5); // 0..4
+  const statHigh = Math.max(35, Math.min(99, overall + delta));
+  const statLow  = Math.max(35, Math.min(99, overall - delta));
   await prisma.player.create({
     data: {
       name: `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`,
       position,
-      overall,
+      statHigh,
+      statLow,
+      overall: Math.round((statHigh + statLow) / 2),
       potential,
       age: 21,
       salary: Math.round((700_000 + overall * overall * 260) / 100_000) * 100_000,

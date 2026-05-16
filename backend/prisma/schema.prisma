@@ -105,6 +105,10 @@ model Player {
   id                 String  @id @default(cuid())
   name               String
   position           String
+  // Each player has two stored stats; overall = round((statHigh + statLow) / 2).
+  // overall stays denormalized so callers (sim, sorting) keep working.
+  statHigh           Int     @default(60)
+  statLow            Int     @default(60)
   overall            Int
   potential          Int
   age                Int

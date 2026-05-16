@@ -47,6 +47,8 @@ type RosterPlayer = {
   name: string;
   position: string;
   overall: number;
+  statHigh: number;
+  statLow: number;
   potential: number;
   age: number;
   depthOrder?: number;
@@ -105,21 +107,28 @@ function playerArchetype(player: RosterPlayer): string {
 }
 
 function keyAttributes(player: RosterPlayer): Record<string, number> {
-  const seed = playerSeed(player);
-  const nudge = (offset: number) => Math.max(35, Math.min(99, player.overall + ((seed + offset) % 13) - 6));
+  // Two-attribute model: each player has exactly two stored stats. Labels are
+  // position-derived; values come from player.statHigh / player.statLow.
+  const high = player.statHigh;
+  const low  = player.statLow;
   switch (player.position) {
-    case 'QB': return { accuracy: nudge(1), awareness: nudge(5), composure: nudge(9), mobility: nudge(13) };
-    case 'RB': return { vision: nudge(2), burst: nudge(6), power: nudge(10), security: nudge(14) };
-    case 'WR':
-    case 'TE': return { hands: nudge(3), routeRunning: nudge(7), separation: nudge(11), toughness: nudge(15) };
-    case 'OL': return { passBlock: nudge(4), runBlock: nudge(8), strength: nudge(12), discipline: nudge(16) };
-    case 'DE':
-    case 'DT': return { rush: nudge(5), strength: nudge(9), runDefense: nudge(13), motor: nudge(17) };
-    case 'LB': return { tackling: nudge(6), coverage: nudge(10), instincts: nudge(14), pursuit: nudge(18) };
-    case 'CB':
-    case 'S': return { coverage: nudge(7), tackling: nudge(11), awareness: nudge(15), ballSkills: nudge(19) };
-    default: return { technique: nudge(8), power: nudge(12), composure: nudge(16), consistency: nudge(20) };
+    case 'QB': return { accuracy: high, strength: low };
+    case 'RB': return { speed:    high, strength: low };
+    case 'WR': return { speed:    high, hands:    low };
+    case 'TE': return { hands:    high, blocking: low };
+    case 'OL': return { strength: high, technique:low };
+    case 'DE': return { speed:    high, strength: low };
+    case 'DT': return { strength: high, technique:low };
+    case 'LB': return { speed:    high, tackling: low };
+    case 'CB': return { speed:    high, coverage: low };
+    case 'S':  return { tackling: high, coverage: low };
+    default:   return { technique:high, power:    low };
   }
+}
+
+function computePlayerOverall(attrs: Record<string, number>): number {
+  const values = Object.values(attrs);
+  return Math.round(values.reduce((sum, v) => sum + v, 0) / values.length);
 }
 
 function schemeFit(player: RosterPlayer, identity: TeamIdentity) {
@@ -614,24 +623,27 @@ app.get('/api/team/:teamId/roster', async (req, res, next) => {
     const players = sortByDepth(team.players);
     const identity = identityFromActiveSchemes(team);
 
-    const enriched = players.map((player) => ({
-      id:        player.id,
-      name:      player.name,
-      position:  player.position,
-      overall:   player.overall,
-      potential: player.potential,
-      age:       player.age,
-      depthOrder: player.depthOrder,
-      archetype: playerArchetype(player),
-      attributes: keyAttributes(player),
-      schemeFit: schemeFit(player, identity),
-      yearsWithClub: 1 + (playerSeed(player) % Math.min(8, Math.max(1, player.age - 20))),
-      contract: {
-        yearsLeft: player.contractYearsLeft,
-        salary:    player.salary,
-        extensionEligible: player.extensionEligible,
-      },
-    }));
+    const enriched = players.map((player) => {
+      const attributes = keyAttributes(player);
+      return {
+        id:        player.id,
+        name:      player.name,
+        position:  player.position,
+        overall:   computePlayerOverall(attributes),
+        potential: player.potential,
+        age:       player.age,
+        depthOrder: player.depthOrder,
+        archetype: playerArchetype(player),
+        attributes,
+        schemeFit: schemeFit(player, identity),
+        yearsWithClub: 1 + (playerSeed(player) % Math.min(8, Math.max(1, player.age - 20))),
+        contract: {
+          yearsLeft: player.contractYearsLeft,
+          salary:    player.salary,
+          extensionEligible: player.extensionEligible,
+        },
+      };
+    });
 
     const salaryUsed = enriched.reduce((sum, player) => sum + player.contract.salary, 0);
 

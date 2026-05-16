@@ -10,6 +10,7 @@ import {
   generateOverall,
   generatePotential,
   generateSalary,
+  splitOverallIntoStats,
 } from './seed';
 import { generateRoundRobin } from './simulation/scheduleGenerator';
 
@@ -67,7 +68,9 @@ async function expandLeagues(): Promise<void> {
       });
 
       const players: Array<{
-        name: string; position: string; overall: number; potential: number;
+        name: string; position: string; overall: number;
+        statHigh: number; statLow: number;
+        potential: number;
         age: number; teamId: string;
         salary: number; contractYearsLeft: number; extensionEligible: boolean;
       }> = [];
@@ -75,10 +78,13 @@ async function expandLeagues(): Promise<void> {
         for (let i = 0; i < count; i++) {
           const age = randomInt(21, 35);
           const overall = generateOverall(age, league.tier);
+          const { statHigh, statLow } = splitOverallIntoStats(overall);
           players.push({
             name:              randomName(),
             position,
-            overall,
+            overall:           Math.round((statHigh + statLow) / 2),
+            statHigh,
+            statLow,
             potential:         generatePotential(age, overall),
             age,
             teamId:            team.id,

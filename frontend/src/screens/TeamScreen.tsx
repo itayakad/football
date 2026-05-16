@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,10 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
 import { DefensiveIdentity, MarketResponse, OffensiveIdentity, RosterPlayer, RosterResponse } from '../api/types';
-import { Card } from '../components/Card';
-import { Pill } from '../components/Pill';
+import { ProfileSheet } from '../components/ProfileSheet';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { SectionLabel } from '../components/SectionLabel';
 import { useUserTeamId } from '../state/userTeam';
 import { colors, radius, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/types';
@@ -40,9 +37,6 @@ const GROUP_BY_POSITION: Record<string, string> = {
   CB: 'secondary',
   S: 'secondary',
 };
-
-const OFFENSE_BENCH_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'OL']);
-const DEFENSE_BENCH_POSITIONS = new Set(['DE', 'DT', 'LB', 'CB', 'S']);
 
 export const TeamScreen: React.FC = () => {
   const userTeamId = useUserTeamId();
@@ -108,10 +102,6 @@ export const TeamScreen: React.FC = () => {
   const offenseSlots = buildOffenseSlots(allPlayers);
   const defenseSlots = buildDefenseSlots(allPlayers);
   const starterIds = new Set([...offenseSlots, ...defenseSlots].map((slot) => slot.player?.id).filter(Boolean));
-  const benchAll = allPlayers.filter((player) => !starterIds.has(player.id)).sort((a, b) => b.overall - a.overall);
-  const bench = benchAll.filter((player) =>
-    unit === 'offense' ? OFFENSE_BENCH_POSITIONS.has(player.position) : DEFENSE_BENCH_POSITIONS.has(player.position)
-  );
   const activeSlots = unit === 'offense' ? offenseSlots : defenseSlots;
 
   const isStarter = selectedPlayer ? starterIds.has(selectedPlayer.id) : false;
@@ -155,7 +145,7 @@ export const TeamScreen: React.FC = () => {
   };
 
   return (
-    <ScreenContainer contentStyle={styles.screenContent}>
+    <ScreenContainer scroll={false} contentStyle={styles.screenContent}>
       <View style={styles.identityBlock}>
         <View style={styles.identityTopRow}>
           <View style={styles.identityLabelGroup}>
@@ -206,7 +196,7 @@ export const TeamScreen: React.FC = () => {
         </View>
       )}
 
-      <View>
+      <View style={styles.rosterPanel}>
         <View style={styles.unitHeader}>
           <View style={styles.segmented}>
             <UnitButton label="Offense" active={unit === 'offense'} onPress={() => setUnit('offense')} />
@@ -292,19 +282,6 @@ export const TeamScreen: React.FC = () => {
             </>
           )}
         </View>
-      </View>
-
-      <View>
-        <Card padded={false}>
-          {bench.map((player, index) => (
-            <PlayerRow
-              key={player.id}
-              player={player}
-              isLast={index === bench.length - 1}
-              onPress={() => setSelectedPlayer(player)}
-            />
-          ))}
-        </Card>
       </View>
 
       <PlayerProfile
@@ -419,38 +396,6 @@ function StarterCard({
   );
 }
 
-function PlayerRow({
-  player,
-  isLast,
-  onPress,
-}: {
-  player: RosterPlayer;
-  isLast: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.playerRow,
-        !isLast && styles.rowDivider,
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={styles.depthBadge}>
-        <Text style={styles.depthText}>{player.position}</Text>
-      </View>
-      <View style={styles.playerMain}>
-        <View style={styles.nameRow}>
-          <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
-          <Text style={styles.overall}>{player.overall}</Text>
-        </View>
-        <Text style={typography.caption} numberOfLines={1}>{player.archetype}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
 function PlayerProfile({
   player,
   subOptions,
@@ -469,110 +414,152 @@ function PlayerProfile({
   onClose: () => void;
 }) {
   const [showSub, setShowSub] = React.useState(false);
+  const [expandedSubId, setExpandedSubId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setShowSub(false);
+    setExpandedSubId(null);
   }, [player]);
 
   if (!player) return null;
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.profileSheet}>
-          <View style={styles.profileHeader}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initials(player.name)}</Text>
-            </View>
-            <View style={styles.profileTitle}>
-              <Text style={styles.profileName} numberOfLines={1}>{player.name}</Text>
-              <Text style={typography.label}>{playerPositionLabel(player.position)}</Text>
-            </View>
-            <View style={{ alignItems: 'flex-end', gap: spacing.sm }}>
-              <Pressable onPress={onClose} style={styles.closeButton}>
-                <Text style={styles.closeText}>x</Text>
-              </Pressable>
-              <Pressable onPress={() => setShowSub(!showSub)} style={styles.subButton}>
-                <Text style={styles.subButtonText}>{showSub ? 'Back' : 'Sub'}</Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {showSub ? (
-            <ScrollView contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
-              <SectionLabel>Eligible Substitutes</SectionLabel>
-              {subOptions.length > 0 ? (
-                subOptions.map(subOpt => {
-                  const firstInitial = subOpt.name.charAt(0);
-                  const lastName = subOpt.name.split(' ').slice(1).join(' ');
-                  return (
-                    <Pressable
-                      key={subOpt.id}
-                      style={styles.subOptionRow}
-                      onPress={() => onSub(player, subOpt)}
-                    >
-                      <Text style={typography.body}>{firstInitial}. {lastName}</Text>
-                      <Text style={[typography.heading, { color: colors.accent.primary }]}>{subOpt.overall}</Text>
-                    </Pressable>
-                  );
-                })
-              ) : (
-                <View>
-                  <Text style={[typography.caption, { marginBottom: spacing.md }]}>No eligible players to sub.</Text>
-                  {topMarketListing && (
-                    <View style={styles.marketOptionCard}>
-                      <SectionLabel>Top Free Agent</SectionLabel>
-                      <View style={[styles.subOptionRow, { marginTop: spacing.xs }]}>
-                        <View>
-                          <Text style={typography.body}>{topMarketListing.player.name}</Text>
-                          <Text style={typography.caption}>{topMarketListing.player.overall} OVR - {topMarketListing.player.age} yrs</Text>
+    <ProfileSheet
+      visible
+      onClose={onClose}
+      name={player.name}
+      subtitle={playerPositionLabel(player.position)}
+      initials={initials(player.name)}
+      action={{
+        label: showSub ? 'Back' : 'Sub',
+        tone: 'neutral',
+        onPress: () => {
+          setShowSub((s) => !s);
+          setExpandedSubId(null);
+        },
+      }}
+    >
+      {showSub ? (
+        <ScrollView contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
+          {subOptions.length > 0 ? (
+            subOptions.map((subOpt) => {
+              const isExpanded = expandedSubId === subOpt.id;
+              const lastName = subOpt.name.split(' ').slice(1).join(' ');
+              return (
+                <View key={subOpt.id} style={[styles.fireCandidateCard, isExpanded && styles.fireCandidateCardExpanded]}>
+                  <Pressable
+                    style={styles.fireCandidateRow}
+                    onPress={() => setExpandedSubId(isExpanded ? null : subOpt.id)}
+                  >
+                    <View style={styles.fireCandidateAvatar}>
+                      <Text style={styles.cardAvatarText}>{initials(subOpt.name)}</Text>
+                    </View>
+                    <Text style={[typography.body, styles.fireCandidateNameCol]} numberOfLines={1}>
+                      {subOpt.name.charAt(0)}. {lastName}
+                    </Text>
+                    <View style={styles.fireCandidateSpacer} />
+                    <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{subOpt.overall}</Text>
+                  </Pressable>
+                  {isExpanded && (
+                    <View style={styles.fireExpand}>
+                      <View style={styles.fireExpandHeader}>
+                        <View style={styles.fireExpandIcon}>
+                          <Text style={styles.fireExpandIconText}>{initials(subOpt.name)}</Text>
                         </View>
-                        <Pressable
-                          style={[styles.buyButton, (!topMarketListing.canBuy || buying) && styles.buyButtonDisabled]}
-                          disabled={!topMarketListing.canBuy || buying}
-                          onPress={() => onBuyMarket(topMarketListing.id)}
-                        >
-                          <Text style={styles.buyButtonText}>
-                            {buying ? '...' : `Buy $${(topMarketListing.askingPrice / 1000000).toFixed(1)}M`}
-                          </Text>
-                        </Pressable>
+                        <View style={styles.fireExpandBars}>
+                          <RatingBar label="OVR" value={subOpt.overall} thick />
+                          {Object.entries(subOpt.attributes).map(([label, value]) => (
+                            <AttributeBar key={label} label={label} value={value} />
+                          ))}
+                        </View>
                       </View>
+                      <Pressable
+                        style={styles.hireButton}
+                        onPress={() => onSub(player, subOpt)}
+                      >
+                        <Text style={styles.hireButtonText}>Sub In</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          ) : (
+            <View style={{ gap: spacing.md }}>
+              <Text style={typography.caption}>No eligible players to sub.</Text>
+              {topMarketListing && (
+                <View style={[styles.fireCandidateCard, expandedSubId === topMarketListing.id && styles.fireCandidateCardExpanded]}>
+                  <Pressable
+                    style={styles.fireCandidateRow}
+                    onPress={() => setExpandedSubId(expandedSubId === topMarketListing.id ? null : topMarketListing.id)}
+                  >
+                    <View style={styles.fireCandidateAvatar}>
+                      <Text style={styles.cardAvatarText}>{initials(topMarketListing.player.name)}</Text>
+                    </View>
+                    <Text style={[typography.body, styles.fireCandidateNameCol]} numberOfLines={1}>
+                      {topMarketListing.player.name.charAt(0)}. {topMarketListing.player.name.split(' ').slice(1).join(' ')}
+                    </Text>
+                    <View style={styles.fireCandidateSpacer} />
+                    <Text style={[styles.fireCandidateCost, styles.fireCandidateCostCol]}>{formatSalary(topMarketListing.askingPrice)}</Text>
+                    <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{topMarketListing.player.overall}</Text>
+                  </Pressable>
+                  {expandedSubId === topMarketListing.id && (
+                    <View style={styles.fireExpand}>
+                      <View style={styles.fireExpandHeader}>
+                        <View style={styles.fireExpandIcon}>
+                          <Text style={styles.fireExpandIconText}>{initials(topMarketListing.player.name)}</Text>
+                        </View>
+                        <View style={styles.fireExpandBars}>
+                          <RatingBar label="OVR" value={topMarketListing.player.overall} thick />
+                        </View>
+                      </View>
+                      <Pressable
+                        style={[styles.hireButton, (!topMarketListing.canBuy || buying) && styles.hireButtonDisabled]}
+                        disabled={!topMarketListing.canBuy || buying}
+                        onPress={() => onBuyMarket(topMarketListing.id)}
+                      >
+                        <Text style={styles.hireButtonText}>
+                          {buying ? '...' : topMarketListing.canBuy ? 'Buy' : 'No Cash'}
+                        </Text>
+                      </Pressable>
                     </View>
                   )}
                 </View>
               )}
-            </ScrollView>
-          ) : (
-            <ScrollView contentContainerStyle={{ gap: spacing.lg }} showsVerticalScrollIndicator={false}>
-              <View style={styles.profileSection}>
-                <SectionLabel>Scheme Fit</SectionLabel>
-                <Pill label={player.schemeFit.label} color={schemeFitColor(player.schemeFit.label)} />
-                <Text style={[typography.caption, styles.fitDetail]}>{player.schemeFit.detail}</Text>
-                <RatingBar label="OVR" value={player.overall} thick />
-              </View>
-
-              <View style={styles.profileSection}>
-                <SectionLabel>Attributes</SectionLabel>
-                {Object.entries(player.attributes).map(([label, value]) => (
-                  <AttributeBar key={label} label={label} value={value} />
-                ))}
-              </View>
-
-              <View style={styles.statusGrid}>
-                <StatusTile label="Contract" value={`${player.contract.yearsLeft}y`} tone={colors.text.primary} />
-                <StatusTile label="Salary" value={formatSalary(player.contract.salary)} tone={colors.text.primary} />
-                <StatusTile
-                  label="Extension"
-                  value={player.contract.extensionEligible ? 'Eligible' : 'Later'}
-                  tone={player.contract.extensionEligible ? colors.warn : colors.text.secondary}
-                />
-                <StatusTile label="Age" value={player.age} tone={colors.text.primary} />
-              </View>
-            </ScrollView>
+            </View>
           )}
-        </View>
-      </View>
-    </Modal>
+        </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={{ gap: spacing.lg }} showsVerticalScrollIndicator={false}>
+          <View style={styles.profileSection}>
+            <View style={styles.playStyleRow}>
+              <Text style={typography.body}>{player.archetype}</Text>
+              <View style={styles.playStyleIconCircle}>
+                <Ionicons
+                  name={schemeFitIcon(player.schemeFit.label)}
+                  size={16}
+                  color={schemeFitColor(player.schemeFit.label)}
+                />
+              </View>
+              <View style={{ flex: 1 }} />
+              <Text style={typography.caption}>Contract {player.contract.yearsLeft}y</Text>
+            </View>
+
+            <RatingBar label="OVR" value={player.overall} thick />
+            {Object.entries(player.attributes).map(([label, value]) => (
+              <AttributeBar key={label} label={label} value={value} />
+            ))}
+          </View>
+
+          <View style={styles.statRow}>
+            <StatItem label="Record" value="0-0" />
+            <StatItem label="Trophies" value={0} />
+            <StatItem label="Tenure" value={`${player.yearsWithClub}y`} />
+            <StatItem label="Age" value={player.age} />
+          </View>
+        </ScrollView>
+      )}
+    </ProfileSheet>
   );
 }
 
@@ -634,121 +621,112 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
     .slice(0, 5);
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.profileSheet} onPress={(e) => e.stopPropagation()}>
-          <View style={styles.profileHeader}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initials(coach.name)}</Text>
+    <ProfileSheet
+      visible
+      onClose={onClose}
+      name={coach.name}
+      subtitle={coachRoleLabel(coach.role)}
+      initials={initials(coach.name)}
+      action={{
+        label: showFire ? 'Back' : 'Fire',
+        tone: 'danger',
+        onPress: () => {
+          setShowFire(!showFire);
+          setExpandedCandidateId(null);
+        },
+      }}
+    >
+      {showFire ? (
+        <ScrollView contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
+          {topCandidates.length > 0 ? (
+            topCandidates.map((candidate) => {
+              const isExpanded = expandedCandidateId === candidate.id;
+              return (
+                <View key={candidate.id} style={[styles.fireCandidateCard, isExpanded && styles.fireCandidateCardExpanded]}>
+                  <Pressable
+                    style={styles.fireCandidateRow}
+                    onPress={() => setExpandedCandidateId(isExpanded ? null : candidate.id)}
+                  >
+                    <View style={styles.fireCandidateAvatar}>
+                      <Ionicons
+                        name={coachPlayStyleIcon(candidate)}
+                        size={20}
+                        color={coachPlayStyleColor(candidate)}
+                      />
+                    </View>
+                    <Text style={[typography.body, styles.fireCandidateNameCol]} numberOfLines={1}>
+                      {candidate.name.charAt(0)}. {candidate.name.split(' ').slice(1).join(' ')}
+                    </Text>
+                    <View style={styles.fireCandidateSpacer} />
+                    <Text style={[styles.fireCandidateCost, styles.fireCandidateCostCol]}>{formatSalary(candidate.cost)}</Text>
+                    <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{candidate.overall}</Text>
+                  </Pressable>
+                  {isExpanded && (
+                    <View style={styles.fireExpand}>
+                      <View style={styles.fireExpandHeader}>
+                        <View style={styles.fireExpandIcon}>
+                          <Text style={styles.fireExpandIconText}>{initials(candidate.name)}</Text>
+                        </View>
+                        <View style={styles.fireExpandBars}>
+                          <RatingBar label="OVR" value={candidate.overall} thick />
+                          {candidate.role !== 'DC' && (
+                            <RatingBar label="OFF" value={candidate.offenseRating} />
+                          )}
+                          {candidate.role !== 'OC' && (
+                            <RatingBar label="DEF" value={candidate.defenseRating} />
+                          )}
+                        </View>
+                      </View>
+                      <Pressable
+                        style={[styles.hireButton, (!candidate.canHire || hireCoach.isPending) && styles.hireButtonDisabled]}
+                        disabled={!candidate.canHire || hireCoach.isPending}
+                        onPress={() => hireCoach.mutate(candidate.id)}
+                      >
+                        <Text style={styles.hireButtonText}>
+                          {hireCoach.isPending ? '...' : candidate.canHire ? 'Hire' : 'No Cash'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              );
+            })
+          ) : (
+            <Text style={typography.caption}>No replacement candidates available.</Text>
+          )}
+        </ScrollView>
+      ) : (
+        <>
+          <View style={styles.profileSection}>
+            <View style={styles.playStyleRow}>
+              <Text style={typography.body}>{coach.philosophy}</Text>
+              <View style={styles.playStyleIconCircle}>
+                <Ionicons
+                  name={coachPlayStyleIcon(coach)}
+                  size={16}
+                  color={coachPlayStyleColor(coach)}
+                />
+              </View>
             </View>
-            <View style={styles.profileTitle}>
-              <Text style={styles.profileName} numberOfLines={1}>{coach.name}</Text>
-              <Text style={typography.label}>{coachRoleLabel(coach.role)}</Text>
-            </View>
-            <Pressable
-              onPress={() => {
-                setShowFire(!showFire);
-                setExpandedCandidateId(null);
-              }}
-              style={styles.fireButton}
-            >
-              <Text style={styles.fireButtonText}>{showFire ? 'Back' : 'Fire'}</Text>
-            </Pressable>
+
+            <RatingBar label="OVR" value={coach.overall} thick />
+            {coach.role !== 'DC' && (
+              <RatingBar label="OFF" value={coach.offenseRating} />
+            )}
+            {coach.role !== 'OC' && (
+              <RatingBar label="DEF" value={coach.defenseRating} />
+            )}
           </View>
 
-          {showFire ? (
-            <ScrollView contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
-              {topCandidates.length > 0 ? (
-                topCandidates.map((candidate) => {
-                  const isExpanded = expandedCandidateId === candidate.id;
-                  return (
-                    <View key={candidate.id} style={[styles.fireCandidateCard, isExpanded && styles.fireCandidateCardExpanded]}>
-                      <Pressable
-                        style={styles.fireCandidateRow}
-                        onPress={() => setExpandedCandidateId(isExpanded ? null : candidate.id)}
-                      >
-                        <View style={styles.fireCandidateAvatar}>
-                          <Ionicons
-                            name={coachPlayStyleIcon(candidate)}
-                            size={20}
-                            color={coachPlayStyleColor(candidate)}
-                          />
-                        </View>
-                        <Text style={[typography.body, styles.fireCandidateNameCol]} numberOfLines={1}>
-                          {candidate.name.charAt(0)}. {candidate.name.split(' ').slice(1).join(' ')}
-                        </Text>
-                        <View style={styles.fireCandidateSpacer} />
-                        <Text style={[styles.fireCandidateCost, styles.fireCandidateCostCol]}>{formatSalary(candidate.cost)}</Text>
-                        <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{candidate.overall}</Text>
-                      </Pressable>
-                      {isExpanded && (
-                        <View style={styles.fireExpand}>
-                          <View style={styles.fireExpandHeader}>
-                            <View style={styles.fireExpandIcon}>
-                              <Text style={styles.fireExpandIconText}>{initials(candidate.name)}</Text>
-                            </View>
-                            <View style={styles.fireExpandBars}>
-                              <RatingBar label="OVR" value={candidate.overall} thick />
-                              {candidate.role !== 'DC' && (
-                                <RatingBar label="OFF" value={candidate.offenseRating} />
-                              )}
-                              {candidate.role !== 'OC' && (
-                                <RatingBar label="DEF" value={candidate.defenseRating} />
-                              )}
-                            </View>
-                          </View>
-                          <Pressable
-                            style={[styles.hireButton, (!candidate.canHire || hireCoach.isPending) && styles.hireButtonDisabled]}
-                            disabled={!candidate.canHire || hireCoach.isPending}
-                            onPress={() => hireCoach.mutate(candidate.id)}
-                          >
-                            <Text style={styles.hireButtonText}>
-                              {hireCoach.isPending ? '...' : candidate.canHire ? 'Hire' : 'No Cash'}
-                            </Text>
-                          </Pressable>
-                        </View>
-                      )}
-                    </View>
-                  );
-                })
-              ) : (
-                <Text style={typography.caption}>No replacement candidates available.</Text>
-              )}
-            </ScrollView>
-          ) : (
-            <>
-              <View style={styles.profileSection}>
-                <View style={styles.playStyleRow}>
-                  <Text style={typography.body}>{coach.philosophy}</Text>
-                  <View style={styles.playStyleIconCircle}>
-                    <Ionicons
-                      name={coachPlayStyleIcon(coach)}
-                      size={16}
-                      color={coachPlayStyleColor(coach)}
-                    />
-                  </View>
-                </View>
-
-                <RatingBar label="OVR" value={coach.overall} thick />
-                {coach.role !== 'DC' && (
-                  <RatingBar label="OFF" value={coach.offenseRating} />
-                )}
-                {coach.role !== 'OC' && (
-                  <RatingBar label="DEF" value={coach.defenseRating} />
-                )}
-              </View>
-
-              <View style={styles.statRow}>
-                <StatItem label="Record" value={`${coach.careerWins}-${coach.careerLosses}`} />
-                <StatItem label="Trophies" value={coach.titles} />
-                <StatItem label="Tenure" value={`${coach.yearsWithTeam}y`} />
-                <StatItem label="Age" value={coach.age} />
-              </View>
-            </>
-          )}
-        </Pressable>
-      </Pressable>
-    </Modal>
+          <View style={styles.statRow}>
+            <StatItem label="Record" value={`${coach.careerWins}-${coach.careerLosses}`} />
+            <StatItem label="Trophies" value={coach.titles} />
+            <StatItem label="Tenure" value={`${coach.yearsWithTeam}y`} />
+            <StatItem label="Age" value={coach.age} />
+          </View>
+        </>
+      )}
+    </ProfileSheet>
   );
 }
 
@@ -882,19 +860,16 @@ function StatItem({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-function StatusTile({ label, value, tone }: { label: string; value: string | number; tone: string }) {
-  return (
-    <View style={styles.statusTile}>
-      <Text style={typography.label}>{label}</Text>
-      <Text style={[typography.heading, { color: tone }]}>{value}</Text>
-    </View>
-  );
-}
-
 function schemeFitColor(fit: RosterPlayer['schemeFit']['label']): string {
   if (fit === 'Excellent Fit') return colors.success;
   if (fit === 'Solid Fit') return colors.accent.primary;
   return colors.warn;
+}
+
+function schemeFitIcon(fit: RosterPlayer['schemeFit']['label']): IoniconName {
+  if (fit === 'Excellent Fit') return 'checkmark-circle-outline';
+  if (fit === 'Solid Fit') return 'checkmark-outline';
+  return 'trending-up-outline';
 }
 
 type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -980,8 +955,10 @@ function formatAttribute(label: string): string {
 
 const styles = StyleSheet.create({
   screenContent: {
-    paddingTop:    spacing.md,
-    paddingBottom: spacing.xl,
+    flex:          1,
+    paddingTop:    spacing.sm,
+    paddingBottom: spacing.sm,
+    gap:           spacing.sm,
   },
   overviewGrid: {
     flexDirection: 'row',
@@ -997,7 +974,7 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   schemeButton: {
-    minHeight: 44,
+    minHeight: 38,
     borderRadius: radius.md,
     backgroundColor: colors.bg.elevated,
     borderWidth: 1,
@@ -1112,7 +1089,7 @@ const styles = StyleSheet.create({
   },
   staffCard: {
     width: '31.5%',
-    minHeight: 128,
+    minHeight: 112,
     borderRadius: radius.md,
     padding: spacing.sm,
     backgroundColor: colors.bg.elevated,
@@ -1127,6 +1104,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  rosterPanel: {
+    flex: 1,
+    minHeight: 0,
+  },
   unitHeader: {
     gap: spacing.sm,
   },
@@ -1134,12 +1115,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: colors.bg.elevated,
     borderRadius: radius.md,
-    padding: spacing.xs,
-    gap: spacing.xs,
+    padding: spacing.sm,
+    gap: spacing.sm,
   },
   unitButton: {
     flex: 1,
-    minHeight: 36,
+    minHeight: 34,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1155,11 +1136,12 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   field: {
-    minHeight: 520,
-    marginTop: spacing.md,
+    flex: 1,
+    minHeight: 0,
+    marginTop: spacing.sm,
     borderRadius: radius.lg,
-    padding: spacing.md,
-    gap: spacing.md,
+    padding: spacing.xs,
+    gap: spacing.xs,
     overflow: 'hidden',
     backgroundColor: '#111B16',
     borderWidth: 1,
@@ -1167,7 +1149,7 @@ const styles = StyleSheet.create({
   },
   yardLineTop: {
     position: 'absolute',
-    top: 148,
+    top: '30%',
     left: spacing.md,
     right: spacing.md,
     height: 1,
@@ -1175,7 +1157,7 @@ const styles = StyleSheet.create({
   },
   yardLineMiddle: {
     position: 'absolute',
-    top: 312,
+    top: '60%',
     left: spacing.md,
     right: spacing.md,
     height: 1,
@@ -1183,7 +1165,7 @@ const styles = StyleSheet.create({
   },
   yardLineBottom: {
     position: 'absolute',
-    bottom: 48,
+    bottom: 44,
     left: spacing.md,
     right: spacing.md,
     height: 1,
@@ -1202,7 +1184,7 @@ const styles = StyleSheet.create({
   starterCard: {
     flex: 1,
     maxWidth: 86,
-    minHeight: 134,
+    minHeight: 118,
     borderRadius: radius.md,
     padding: spacing.sm,
     backgroundColor: colors.bg.elevated,
@@ -1213,7 +1195,7 @@ const styles = StyleSheet.create({
   },
   starterCardCompact: {
     maxWidth: 62,
-    minHeight: 124,
+    minHeight: 108,
     paddingHorizontal: spacing.xs,
   },
   starterCardFeatured: {
@@ -1264,120 +1246,8 @@ const styles = StyleSheet.create({
     width: '100%',
     textAlign: 'center',
   },
-  playerRow: {
-    minHeight: 78,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingLeft: spacing.md,
-    paddingRight: spacing.sm,
-    gap: spacing.md,
-  },
-  rowDivider: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
-  },
   pressed: {
     backgroundColor: colors.bg.surface,
-  },
-  depthBadge: {
-    minWidth: 34,
-    height: 28,
-    borderRadius: radius.sm,
-    backgroundColor: colors.bg.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.xs,
-  },
-  depthText: {
-    ...typography.label,
-    color: colors.text.secondary,
-    fontSize: 10,
-  },
-  playerMain: {
-    flex: 1,
-    minWidth: 0,
-    gap: spacing.xs,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-  },
-  playerName: {
-    ...typography.body,
-    flex: 1,
-    fontWeight: '700',
-  },
-  overall: {
-    ...typography.heading,
-    color: colors.accent.primary,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: colors.bg.overlay,
-    justifyContent: 'flex-end',
-  },
-  profileSheet: {
-    backgroundColor: colors.bg.elevated,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    padding: spacing.lg,
-    gap: spacing.lg,
-    maxHeight: '88%',
-  },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.bg.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  avatarText: {
-    ...typography.heading,
-    color: colors.text.secondary,
-  },
-  profileTitle: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  profileName: {
-    ...typography.title,
-    fontSize: 22,
-  },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.bg.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeText: {
-    ...typography.heading,
-    color: colors.text.secondary,
-  },
-  subButton: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: colors.bg.surface,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  subButtonText: {
-    ...typography.caption,
-    color: colors.text.primary,
-    fontWeight: '700',
   },
   subOptionRow: {
     flexDirection: 'row',
@@ -1438,17 +1308,6 @@ const styles = StyleSheet.create({
   },
   ratingValueStrong: {
     color: colors.text.primary,
-    fontWeight: '800',
-  },
-  fireButton: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.danger,
-    borderRadius: radius.sm,
-  },
-  fireButtonText: {
-    ...typography.caption,
-    color: colors.bg.elevated,
     fontWeight: '800',
   },
   fireCandidateCard: {
