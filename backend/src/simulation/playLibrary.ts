@@ -10,8 +10,8 @@ export type PlayUnit = 'offense' | 'defense';
 // Stable slot identifiers — resolved against a roster at sim time. Each team
 // gets one player mapped to each slot (best at the position, ranked by overall).
 export type PlayerSlot =
-  | 'QB' | 'RB' | 'WR1' | 'WR2' | 'SLOT' | 'TE'
-  | 'LT' | 'LG' | 'C' | 'RG' | 'RT'
+  | 'QB' | 'RB' | 'WR' | 'TE'
+  | 'T' | 'G' | 'C'
   | 'EDGE1' | 'EDGE2' | 'DT1' | 'DT2'
   | 'MLB' | 'WLB' | 'SLB'
   | 'CB1' | 'CB2' | 'NCB' | 'FS' | 'SS';
@@ -98,36 +98,36 @@ const d = (id: string, name: string, category: DefensiveCategory, keySlots: [Pla
 
 export const OFFENSIVE_PLAYS: OffensivePlay[] = [
   // RUNNING (6) — RB + OL slots dominate base strength
-  o('inside_zone',    'Inside Zone',    'RUNNING', ['RB',  'LG', 'C']),
-  o('outside_zone',   'Outside Zone',   'RUNNING', ['RB',  'LT', 'LG']),
-  o('power',          'Power',          'RUNNING', ['RB',  'RG', 'RT']),
-  o('counter',        'Counter',        'RUNNING', ['RB',  'LG', 'LT']),
-  o('lead_iso',       'Lead Iso',       'RUNNING', ['RB',  'C',  'RG']),
-  o('toss_sweep',     'Toss Sweep',     'RUNNING', ['RB',  'RT', 'WR1']),
+  o('inside_zone',    'Inside Zone',    'RUNNING', ['RB',  'G', 'C']),
+  o('outside_zone',   'Outside Zone',   'RUNNING', ['RB',  'T', 'G']),
+  o('power',          'Power',          'RUNNING', ['RB',  'G', 'T']),
+  o('counter',        'Counter',        'RUNNING', ['RB',  'G', 'T']),
+  o('lead_iso',       'Lead Iso',       'RUNNING', ['RB',  'C', 'G']),
+  o('toss_sweep',     'Toss Sweep',     'RUNNING', ['RB',  'T', 'WR']),
 
   // SHORT PASS (6) — QB + underneath route runners
-  o('slants',         'Slants',         'SHORT_PASS', ['QB', 'WR1',  'SLOT']),
-  o('stick',          'Stick',          'SHORT_PASS', ['QB', 'TE',   'SLOT']),
-  o('mesh',           'Mesh',           'SHORT_PASS', ['QB', 'WR1',  'SLOT']),
-  o('quick_out',      'Quick Out',      'SHORT_PASS', ['QB', 'WR1',  'WR2']),
-  o('bubble_screen',  'Bubble Screen',  'SHORT_PASS', ['QB', 'SLOT', 'LG']),
-  o('hitch',          'Hitch',          'SHORT_PASS', ['QB', 'WR2',  'TE']),
+  o('slants',         'Slants',         'SHORT_PASS', ['QB', 'WR', 'WR']),
+  o('stick',          'Stick',          'SHORT_PASS', ['QB', 'TE', 'WR']),
+  o('mesh',           'Mesh',           'SHORT_PASS', ['QB', 'WR', 'WR']),
+  o('quick_out',      'Quick Out',      'SHORT_PASS', ['QB', 'WR', 'WR']),
+  o('bubble_screen',  'Bubble Screen',  'SHORT_PASS', ['QB', 'WR', 'G']),
+  o('hitch',          'Hitch',          'SHORT_PASS', ['QB', 'WR', 'TE']),
 
   // MIDDLE PASS (6) — QB + intermediate threats
-  o('levels',         'Levels',         'MIDDLE_PASS', ['QB', 'WR1',  'TE']),
-  o('y_cross',        'Y-Cross',        'MIDDLE_PASS', ['QB', 'TE',   'WR2']),
-  o('drive',          'Drive',          'MIDDLE_PASS', ['QB', 'SLOT', 'WR1']),
-  o('curl_flat',      'Curl Flat',      'MIDDLE_PASS', ['QB', 'WR1',  'RB']),
-  o('pa_boot',        'PA Boot',        'MIDDLE_PASS', ['QB', 'TE',   'RB']),
-  o('snag',           'Snag',           'MIDDLE_PASS', ['QB', 'WR1',  'SLOT']),
+  o('levels',         'Levels',         'MIDDLE_PASS', ['QB', 'WR', 'TE']),
+  o('y_cross',        'Y-Cross',        'MIDDLE_PASS', ['QB', 'TE', 'WR']),
+  o('drive',          'Drive',          'MIDDLE_PASS', ['QB', 'WR', 'WR']),
+  o('curl_flat',      'Curl Flat',      'MIDDLE_PASS', ['QB', 'WR', 'RB']),
+  o('pa_boot',        'PA Boot',        'MIDDLE_PASS', ['QB', 'TE', 'RB']),
+  o('snag',           'Snag',           'MIDDLE_PASS', ['QB', 'WR', 'WR']),
 
   // LONG PASS (6) — QB + deep threats + protection
-  o('four_verticals', 'Four Verticals', 'LONG_PASS', ['QB', 'WR1', 'LT']),
-  o('post_wheel',     'Post-Wheel',     'LONG_PASS', ['QB', 'WR1', 'RB']),
-  o('sail',           'Sail',           'LONG_PASS', ['QB', 'WR2', 'TE']),
-  o('air_six',        'Air Six',        'LONG_PASS', ['QB', 'WR1', 'LT']),
-  o('pa_crossers',    'PA Crossers',    'LONG_PASS', ['QB', 'WR1', 'WR2']),
-  o('take_shot',      'Take Shot',      'LONG_PASS', ['QB', 'WR1', 'SLOT']),
+  o('four_verticals', 'Four Verticals', 'LONG_PASS', ['QB', 'WR', 'T']),
+  o('post_wheel',     'Post-Wheel',     'LONG_PASS', ['QB', 'WR', 'RB']),
+  o('sail',           'Sail',           'LONG_PASS', ['QB', 'WR', 'TE']),
+  o('air_six',        'Air Six',        'LONG_PASS', ['QB', 'WR', 'T']),
+  o('pa_crossers',    'PA Crossers',    'LONG_PASS', ['QB', 'WR', 'WR']),
+  o('take_shot',      'Take Shot',      'LONG_PASS', ['QB', 'WR', 'WR']),
 ];
 
 export const DEFENSIVE_PLAYS: DefensivePlay[] = [

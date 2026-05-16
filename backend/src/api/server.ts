@@ -24,11 +24,16 @@ import { generateNewsFeed } from './newsGenerator';
 import { finalizeCurrentSeason } from '../simulation/seasonHistory';
 import { advanceOffseason } from '../simulation/offseason';
 import {
-  pickDefensiveCoachPhilosophy,
+  generateOverall,
+  generatePotential,
+  generateSalary,
+  randomName,
+  splitOverallIntoStats,
+} from '../seed';
+import {
+  pickDCPhilosophy,
   pickHeadCoachPhilosophy,
-  pickOffensiveCoachPhilosophy,
-  randomDefensiveIdentity,
-  randomOffensiveIdentity,
+  pickOCPhilosophy,
 } from '../simulation/coachPhilosophy';
 
 const app  = express();
@@ -62,6 +67,7 @@ type CoachRole = 'HEAD_COACH' | 'OC' | 'DC';
 const COACH_FIRST_NAMES = ['Frank', 'Marty', 'Calvin', 'Shane', 'Victor', 'Eli', 'Grant', 'Wes', 'Nolan', 'Ray', 'Cole', 'Andre'];
 const COACH_LAST_NAMES = ['Hayes', 'Bennett', 'Porter', 'Hughes', 'Walsh', 'Foster', 'Carver', 'Brooks', 'Sullivan', 'Pierce', 'Graves', 'Knight'];
 const COACH_SPECIALTIES = ['QB', 'Skill', 'OL', 'DL', 'LB', 'Secondary'];
+const PLAYER_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'OL', 'DE', 'DT', 'LB', 'CB', 'S'];
 
 const POSITION_GROUPS: Array<{ key: string; label: string; positions: string[] }> = [
   { key: 'qb',        label: 'QB',            positions: ['QB'] },
@@ -90,20 +96,99 @@ function playerSeed(player: RosterPlayer): number {
 }
 
 function playerArchetype(player: RosterPlayer): string {
-  const roll = playerSeed(player) % 3;
-  const byPosition: Record<string, string[]> = {
-    QB: ['Field General', 'Gunslinger', 'Dual Threat'],
-    RB: ['Workhorse', 'Elusive Back', 'Power Runner'],
-    WR: ['Deep Threat', 'Route Technician', 'Possession Target'],
-    TE: ['Move Tight End', 'Red Zone Target', 'Inline Blocker'],
-    OL: ['Pass Protector', 'Road Grader', 'Technician'],
-    DE: ['Edge Rusher', 'Power End', 'Run Setter'],
-    DT: ['Interior Anchor', 'Disruptor', 'Nose Tackle'],
-    LB: ['Field General', 'Coverage Backer', 'Downhill Thumper'],
-    CB: ['Lockdown Corner', 'Ball Hawk', 'Press Specialist'],
-    S:  ['Deep Safety', 'Box Safety', 'Playmaker'],
+  const diff = player.statHigh - player.statLow;  // always even: 0,2,4,6,8,10,12
+  // 5 tiers mapped to the actual diff values
+  const tier = diff >= 12 ? 0 : diff >= 10 ? 1 : diff >= 6 ? 2 : diff >= 2 ? 3 : 4;
+  const variant = playerSeed(player) % 2;  // deterministic pick between two names
+
+  // Each position maps [stat1Label vs stat2Label] to 5 tiers × 2 variants.
+  // Tier 0 = stat1-dominant, Tier 4 = very balanced / stat2-leaning.
+  const archetypes: Record<string, [string, string][]> = {
+    // accuracy vs strength
+    QB: [
+      ['Precision Surgeon', 'Touch Passer'],          // very accuracy-dominant
+      ['Field General', 'Pocket Maestro'],             // accuracy-leaning
+      ['Dual Threat', 'Complete Signal-Caller'],       // balanced
+      ['Gunslinger', 'Strong-Arm Playmaker'],          // strength-leaning
+      ['Cannon Arm', 'Rocket Launcher'],               // very strength-dominant
+    ],
+    // speed vs strength
+    RB: [
+      ['Breakaway Burner', 'Jet Sweeper'],             // very speed-dominant
+      ['Elusive Back', 'Scatback'],                    // speed-leaning
+      ['All-Purpose Back', 'Complete Runner'],          // balanced
+      ['Power Runner', 'Downhill Hammer'],              // strength-leaning
+      ['Bruiser', 'Workhorse'],                        // very strength-dominant
+    ],
+    // speed vs hands
+    WR: [
+      ['Deep Threat', 'Burner'],                       // very speed-dominant
+      ['Vertical Weapon', 'Field Stretcher'],           // speed-leaning
+      ['Route Technician', 'Complete Receiver'],        // balanced
+      ['Possession Target', 'Sure Hands'],              // hands-leaning
+      ['Chain Mover', 'Contested Catch King'],          // very hands-dominant
+    ],
+    // hands vs blocking
+    TE: [
+      ['Seam Stretcher', 'Receiving Weapon'],           // very hands-dominant
+      ['Move Tight End', 'Red Zone Target'],            // hands-leaning
+      ['Complete Tight End', 'Versatile Weapon'],        // balanced
+      ['Y-Tight End', 'In-Line Blocker'],               // blocking-leaning
+      ['Road Grader', 'Mauler'],                       // very blocking-dominant
+    ],
+    // strength vs technique
+    OL: [
+      ['Pancake Machine', 'Power Mauler'],              // very strength-dominant
+      ['Road Grader', 'Drive Blocker'],                 // strength-leaning
+      ['Complete Lineman', 'Anchor'],                   // balanced
+      ['Pass Protector', 'Technician'],                 // technique-leaning
+      ['Wall Specialist', 'Finesse Blocker'],            // very technique-dominant
+    ],
+    // speed vs strength
+    DE: [
+      ['Speed Rusher', 'Edge Burner'],                  // very speed-dominant
+      ['Bend Specialist', 'Edge Rusher'],               // speed-leaning
+      ['Complete End', 'Versatile Edge'],                // balanced
+      ['Power End', 'Bull Rusher'],                     // strength-leaning
+      ['Run Stuffer', 'Anchor End'],                    // very strength-dominant
+    ],
+    // strength vs technique
+    DT: [
+      ['Space Eater', 'Immovable Object'],              // very strength-dominant
+      ['Interior Anchor', 'Nose Tackle'],               // strength-leaning
+      ['Two-Gap Defender', 'Complete Interior'],         // balanced
+      ['Disruptor', 'Penetrator'],                     // technique-leaning
+      ['Quick Twitch', 'Interior Menace'],              // very technique-dominant
+    ],
+    // speed vs tackling
+    LB: [
+      ['Coverage Backer', 'Rangefinder'],               // very speed-dominant
+      ['Sideline-to-Sideline', 'Pursuit Specialist'],   // speed-leaning
+      ['Complete Linebacker', 'Field General'],          // balanced
+      ['Downhill Thumper', 'Sure Tackler'],              // tackling-leaning
+      ['Run Stopper', 'Enforcer'],                     // very tackling-dominant
+    ],
+    // speed vs coverage
+    CB: [
+      ['Press Specialist', 'Shutdown Speed'],            // very speed-dominant
+      ['Lockdown Corner', 'Trail Specialist'],           // speed-leaning
+      ['Complete Corner', 'Versatile Cover Man'],        // balanced
+      ['Ball Hawk', 'Zone Reader'],                    // coverage-leaning
+      ['Coverage Technician', 'Instinct Player'],       // very coverage-dominant
+    ],
+    // tackling vs coverage
+    S: [
+      ['Box Safety', 'Enforcer'],                       // very tackling-dominant
+      ['Hard Hitter', 'Run Support'],                   // tackling-leaning
+      ['Complete Safety', 'Two-Way Player'],             // balanced
+      ['Center Fielder', 'Playmaker'],                  // coverage-leaning
+      ['Deep Safety', 'Ball Hawk'],                    // very coverage-dominant
+    ],
   };
-  return (byPosition[player.position] ?? ['Balanced Contributor', 'Role Player', 'Specialist'])[roll];
+
+  const posArchetypes = archetypes[player.position];
+  if (!posArchetypes) return 'Balanced Contributor';
+  return posArchetypes[tier][variant];
 }
 
 function keyAttributes(player: RosterPlayer): Record<string, number> {
@@ -155,9 +240,44 @@ function coachRoleOrder(role: string): number {
   return 3;
 }
 
-function coachCost(coach: { reputation: number; role: string; titles: number }): number {
+function coachOverallByRole(coach: { role: string; offenseRating: number; defenseRating: number; developmentRating?: number | null }): number {
+  const developmentRating = coach.developmentRating ?? Math.round((coach.offenseRating + coach.defenseRating) / 2);
+  // For OC: offenseRating=passScheming, defenseRating=runScheming → overall from both + dev
+  // For DC: offenseRating=runDefense, defenseRating=passDefense → overall from both + dev
+  if (coach.role === 'OC' || coach.role === 'DC') {
+    return Math.round((coach.offenseRating + coach.defenseRating + developmentRating) / 3);
+  }
+  // HC: offense vs defense
+  return Math.round((coach.offenseRating + coach.defenseRating) / 2);
+}
+
+function calculatedCoachSalary(coach: { reputation: number; role: string; titles: number }): number {
   const rolePremium = coach.role === 'HEAD_COACH' ? 1.8 : 1.0;
   return Math.round((1_500_000 + coach.reputation * coach.reputation * 2_200 * rolePremium + coach.titles * 850_000) / 100_000) * 100_000;
+}
+
+function coachAnnualSalary(coach: { salary?: number | null; reputation: number; role: string; titles: number }): number {
+  return coach.salary ?? calculatedCoachSalary(coach);
+}
+
+function coachContractYears(role: string): number {
+  return role === 'HEAD_COACH' ? 4 : 3;
+}
+
+function coachContractPayload(coach: { salary?: number | null; contractYearsLeft?: number | null; contractTotalYears?: number | null; contractTotalCost?: number | null; reputation: number; role: string; titles: number }) {
+  const salary = coachAnnualSalary(coach);
+  const yearsLeft = coach.contractYearsLeft ?? coachContractYears(coach.role);
+  const totalYears = coach.contractTotalYears ?? yearsLeft;
+  return {
+    salary,
+    yearsLeft,
+    totalYears,
+    totalCost: coach.contractTotalCost ?? salary * totalYears,
+  };
+}
+
+function coachCost(coach: { salary?: number | null; contractYearsLeft?: number | null; contractTotalYears?: number | null; contractTotalCost?: number | null; reputation: number; role: string; titles: number }): number {
+  return coachContractPayload(coach).totalCost;
 }
 
 function coachMarketStory(coach: { role: string; philosophy: string; developmentSpecialty: string; reputation: number; hotSeat: number; titles: number }): string {
@@ -175,37 +295,62 @@ function randomCoachName(): string {
 function buildCoachCandidate(role: CoachRole) {
   const specialty = COACH_SPECIALTIES[Math.floor(Math.random() * COACH_SPECIALTIES.length)];
   const baseRating = 48 + Math.floor(Math.random() * 32); // 48..79
-  const offenseRating =
-    role === 'OC' ? Math.min(99, baseRating + 4 + Math.floor(Math.random() * 8)) :
-    role === 'DC' ? Math.max(35, baseRating - 4 - Math.floor(Math.random() * 8)) :
-    Math.max(35, Math.min(99, baseRating + (Math.floor(Math.random() * 12) - 4)));
-  const defenseRating =
-    role === 'DC' ? Math.min(99, baseRating + 4 + Math.floor(Math.random() * 8)) :
-    role === 'OC' ? Math.max(35, baseRating - 4 - Math.floor(Math.random() * 8)) :
-    Math.max(35, Math.min(99, baseRating + (Math.floor(Math.random() * 12) - 4)));
+  let offenseRating: number;
+  let defenseRating: number;
+  if (role === 'OC') {
+    // offenseRating = pass scheming, defenseRating = run scheming
+    const passScheming = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+    const runScheming  = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+    offenseRating = passScheming;
+    defenseRating = runScheming;
+  } else if (role === 'DC') {
+    // offenseRating = run defense, defenseRating = pass defense
+    const runDefense  = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+    const passDefense = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+    offenseRating = runDefense;
+    defenseRating = passDefense;
+  } else {
+    offenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 12) - 4));
+    defenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 12) - 4));
+  }
   const philosophy =
-    role === 'OC' ? pickOffensiveCoachPhilosophy(randomOffensiveIdentity()) :
-    role === 'DC' ? pickDefensiveCoachPhilosophy(randomDefensiveIdentity()) :
+    role === 'OC' ? pickOCPhilosophy(offenseRating, defenseRating) :
+    role === 'DC' ? pickDCPhilosophy(offenseRating, defenseRating) :
     role === 'HEAD_COACH' ? pickHeadCoachPhilosophy(offenseRating, defenseRating) :
     'Balanced Playcaller';
-  return {
+  const reputation = 42 + Math.floor(Math.random() * 36);
+  const developmentRating =
+    role === 'OC' ? Math.max(35, Math.min(99, Math.round((offenseRating + defenseRating) / 2) + Math.floor(Math.random() * 9) - 4)) :
+    role === 'DC' ? Math.max(35, Math.min(99, Math.round((offenseRating + defenseRating) / 2) + Math.floor(Math.random() * 9) - 4)) :
+    Math.round((offenseRating + defenseRating) / 2);
+  const coach = {
     name: randomCoachName(),
     role,
     philosophy,
     developmentSpecialty: specialty,
     aggression: 35 + Math.floor(Math.random() * 58),
-    reputation: 42 + Math.floor(Math.random() * 36),
-    overall: Math.round((offenseRating + defenseRating) / 2),
+    reputation,
+    overall: coachOverallByRole({ role, offenseRating, defenseRating, developmentRating }),
     offenseRating,
     defenseRating,
+    developmentRating,
     hotSeat: 8 + Math.floor(Math.random() * 28),
     yearsWithTeam: 0,
+    contractYearsLeft: 1,
+    contractTotalYears: 1,
     age: 34 + Math.floor(Math.random() * 28),
     teamId: null,
+  };
+  const salary = calculatedCoachSalary({ reputation: coach.reputation, role: coach.role, titles: 0 });
+  return {
+    ...coach,
+    salary,
+    contractTotalCost: salary,
   };
 }
 
 function coachPayload(coach: any) {
+  const contract = coachContractPayload(coach);
   return {
     id: coach.id,
     name: coach.name,
@@ -214,12 +359,16 @@ function coachPayload(coach: any) {
     developmentSpecialty: coach.developmentSpecialty,
     aggression: coach.aggression,
     reputation: coach.reputation,
-    overall: Math.round((coach.offenseRating + coach.defenseRating) / 2),
+    overall: coachOverallByRole(coach),
     offenseRating: coach.offenseRating,
     defenseRating: coach.defenseRating,
+    developmentRating: coach.developmentRating,
     careerWins: coach.careerWins,
     careerLosses: coach.careerLosses,
     titles: coach.titles,
+    salary: contract.salary,
+    contractYearsLeft: contract.yearsLeft,
+    contract,
     hotSeat: coach.hotSeat,
     yearsWithTeam: coach.yearsWithTeam,
     age: coach.age,
@@ -276,6 +425,46 @@ function marketPlayer(player: RosterPlayer, team: { offensivePlays?: unknown; de
       extensionEligible: player.extensionEligible,
     },
   };
+}
+
+function freeAgentPlayer(player: RosterPlayer, salaryUsed: number, salaryCap: number) {
+  return {
+    ...marketPlayer(player, {}),
+    attributes: keyAttributes(player),
+    canSign: salaryUsed + (player.salary ?? 0) <= salaryCap,
+  };
+}
+
+function buildFreeAgentPlayer(position: string) {
+  const age = 22 + Math.floor(Math.random() * 12);
+  const overall = generateOverall(age, 2);
+  const { statHigh, statLow } = splitOverallIntoStats(overall);
+  return {
+    name: randomName(),
+    position,
+    overall: Math.round((statHigh + statLow) / 2),
+    statHigh,
+    statLow,
+    potential: generatePotential(age, overall),
+    age,
+    salary: generateSalary(overall, age),
+    contractYearsLeft: 1 + Math.floor(Math.random() * 3),
+    extensionEligible: false,
+    teamId: null,
+  };
+}
+
+async function ensurePlayerFreeAgents(position?: string): Promise<void> {
+  const positions = position && PLAYER_POSITIONS.includes(position) ? [position] : PLAYER_POSITIONS;
+  for (const pos of positions) {
+    const count = await prisma.player.count({ where: { teamId: null, position: pos } });
+    const needed = Math.max(0, 8 - count);
+    if (needed > 0) {
+      await prisma.player.createMany({
+        data: Array.from({ length: needed }, () => buildFreeAgentPlayer(pos)),
+      });
+    }
+  }
 }
 
 async function ensureMarketListings(userTeamId: string): Promise<void> {
@@ -665,22 +854,9 @@ app.get('/api/team/:teamId/roster', async (req, res, next) => {
         salaryCap:     150_000_000,
         salaryUsed,
         coaches:       team.coaches.sort((a, b) => coachRoleOrder(a.role) - coachRoleOrder(b.role)).map((coach) => ({
-          id: coach.id,
-          name: coach.name,
-          role: coach.role,
-          philosophy: coach.philosophy,
-          developmentSpecialty: coach.developmentSpecialty,
-          aggression: coach.aggression,
-          reputation: coach.reputation,
-          overall: Math.round((coach.offenseRating + coach.defenseRating) / 2),
-          offenseRating: coach.offenseRating,
-          defenseRating: coach.defenseRating,
-          careerWins: coach.careerWins,
-          careerLosses: coach.careerLosses,
-          titles: coach.titles,
-          hotSeat: coach.hotSeat,
-          yearsWithTeam: coach.yearsWithTeam,
-          age: coach.age,
+          ...coachPayload(coach),
+          story: undefined,
+          cost: undefined,
         })),
       },
       schemes: schemes.map(schemePayload),
@@ -881,6 +1057,9 @@ app.post('/api/coaches/:coachId/hire', async (req, res, next) => {
         data: {
           teamId: null,
           yearsWithTeam: 0,
+          contractYearsLeft: 1,
+          contractTotalYears: 1,
+          contractTotalCost: outgoing.salary,
           hotSeat: Math.max(10, Math.round(outgoing.hotSeat * 0.6)),
         },
       })] : []),
@@ -889,10 +1068,77 @@ app.post('/api/coaches/:coachId/hire', async (req, res, next) => {
         data: {
           teamId,
           yearsWithTeam: 1,
+          contractYearsLeft: coachContractYears(incoming.role),
+          contractTotalYears: coachContractYears(incoming.role),
+          contractTotalCost: incoming.salary * coachContractYears(incoming.role),
           hotSeat: Math.max(8, Math.round(incoming.hotSeat * 0.5)),
         },
       }),
     ]);
+
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ─── GET /api/players/free-agents ────────────────────────
+//
+// Position-filtered free-agent pool used by the roster substitution sheet.
+app.get('/api/players/free-agents', async (req, res, next) => {
+  try {
+    const teamId = req.query.teamId as string | undefined;
+    const position = req.query.position as string | undefined;
+    const limit = Math.max(1, Math.min(12, parseInt(String(req.query.limit ?? '5'), 10)));
+    if (!teamId) return res.status(400).json({ error: 'teamId is required' });
+    if (!position || !PLAYER_POSITIONS.includes(position)) return res.status(400).json({ error: 'valid position is required' });
+
+    await ensurePlayerFreeAgents(position);
+
+    const [team, players] = await Promise.all([
+      prisma.team.findUnique({ where: { id: teamId }, include: { players: true } }),
+      prisma.player.findMany({
+        where: { teamId: null, position },
+        orderBy: [{ overall: 'desc' }, { age: 'asc' }],
+        take: limit,
+      }),
+    ]);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+
+    const salaryCap = 150_000_000;
+    const salaryUsed = team.players.reduce((sum, player) => sum + player.salary, 0);
+    res.json({
+      candidates: players.map((player) => freeAgentPlayer(player, salaryUsed, salaryCap)),
+    });
+  } catch (e) { next(e); }
+});
+
+// ─── POST /api/players/free-agents/:playerId/sign ────────
+app.post('/api/players/free-agents/:playerId/sign', async (req, res, next) => {
+  try {
+    const { playerId } = req.params;
+    const { teamId } = req.body as { teamId?: string };
+    if (!teamId) return res.status(400).json({ error: 'teamId is required' });
+
+    const [team, player] = await Promise.all([
+      prisma.team.findUnique({ where: { id: teamId }, include: { players: true } }),
+      prisma.player.findUnique({ where: { id: playerId } }),
+    ]);
+    if (!team) return res.status(404).json({ error: 'Team not found' });
+    if (!player || player.teamId) return res.status(404).json({ error: 'Free agent not available' });
+
+    const salaryUsed = team.players.reduce((sum, rosterPlayer) => sum + rosterPlayer.salary, 0);
+    if (salaryUsed + player.salary > 150_000_000) return res.status(400).json({ error: 'Salary cap exceeded' });
+
+    const maxDepth = team.players
+      .filter((rosterPlayer) => rosterPlayer.position === player.position)
+      .reduce((max, rosterPlayer) => Math.max(max, rosterPlayer.depthOrder), 0);
+
+    await prisma.player.update({
+      where: { id: playerId },
+      data: {
+        teamId,
+        depthOrder: maxDepth + 1,
+      },
+    });
 
     res.json({ ok: true });
   } catch (e) { next(e); }

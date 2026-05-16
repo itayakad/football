@@ -3,11 +3,9 @@ import { prisma } from './db';
 import { generateRoundRobin } from './simulation/scheduleGenerator';
 import { DEFENSIVE_PLAYS, OFFENSIVE_PLAYS, PlayCategory } from './simulation/playLibrary';
 import {
-  defensiveIdentityForStyle,
-  offensiveIdentityForStyle,
-  pickDefensiveCoachPhilosophy,
+  pickDCPhilosophy,
   pickHeadCoachPhilosophy,
-  pickOffensiveCoachPhilosophy,
+  pickOCPhilosophy,
 } from './simulation/coachPhilosophy';
 import { deriveTeamIdentity, TeamIdentity } from './simulation/teamIdentity';
 
@@ -98,7 +96,7 @@ const TEAMS_BY_TIER: Record<number, Array<{
 const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
   QB: 1,
   RB: 2,
-  WR: 3,
+  WR: 2,
   TE: 1,
   OL: 5,
   DE: 2,
@@ -147,6 +145,11 @@ export function randomName(): string {
 
 function randomCoachName(): string {
   return `${randomElement(COACH_FIRST_NAMES)} ${randomElement(COACH_LAST_NAMES)}`;
+}
+
+function coachSalary(role: string, reputation: number, titles = 0): number {
+  const rolePremium = role === 'HEAD_COACH' ? 1.8 : 1.0;
+  return Math.round((1_500_000 + reputation * reputation * 2_200 * rolePremium + titles * 850_000) / 100_000) * 100_000;
 }
 
 // Age curve: young players are rawer, veterans are settled.
@@ -322,8 +325,6 @@ function defensiveLoadoutForStyle(defenseStyle: string): string[] {
 }
 
 export function buildCoachStaff(teamId: string, offenseStyle: string, defenseStyle: string, identity?: TeamIdentity) {
-  const offensiveIdentity = identity?.offense ?? offensiveIdentityForStyle(offenseStyle);
-  const defensiveIdentity = identity?.defense ?? defensiveIdentityForStyle(defenseStyle);
   const offensiveSpecialty = offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : randomElement(['QB', 'Skill', 'OL']);
   const defensiveSpecialty = defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? randomElement(['DL', 'LB']) : randomElement(['LB', 'Secondary']);
   const hcOvr = randomInt(50, 82);
@@ -333,52 +334,78 @@ export function buildCoachStaff(teamId: string, offenseStyle: string, defenseSty
     (() => {
       const hcOffense = clampRating(hcOvr + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? randomInt(2, 8) : randomInt(-2, 5)));
       const hcDefense = clampRating(hcOvr + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? randomInt(2, 8) : randomInt(-2, 5)));
+      const developmentRating = Math.round((hcOffense + hcDefense) / 2);
+      const role = 'HEAD_COACH';
+      const reputation = randomInt(45, 78);
       return {
         name: randomCoachName(),
-        role: 'HEAD_COACH',
+        role,
         philosophy: pickHeadCoachPhilosophy(hcOffense, hcDefense),
         developmentSpecialty: randomElement(DEVELOPMENT_SPECIALTIES),
         aggression: defenseStyle === 'AGGRESSIVE' ? randomInt(70, 92) : randomInt(35, 70),
-        reputation: randomInt(45, 78),
+        reputation,
         overall: Math.round((hcOffense + hcDefense) / 2),
         offenseRating: hcOffense,
         defenseRating: hcDefense,
+        developmentRating,
+        salary: coachSalary(role, reputation),
+        contractYearsLeft: 4,
+        contractTotalYears: 4,
+        contractTotalCost: coachSalary(role, reputation) * 4,
         hotSeat: randomInt(12, 35),
         age: randomInt(39, 64),
         teamId,
       };
     })(),
     (() => {
-      const ocOffense = clampRating(ocOvr + randomInt(0, 8));
-      const ocDefense = clampRating(ocOvr + randomInt(-8, 0));
+      // OC: offenseRating = pass scheming, defenseRating = run scheming
+      const passScheming = clampRating(ocOvr + randomInt(-8, 12));
+      const runScheming  = clampRating(ocOvr + randomInt(-8, 12));
+      const developmentRating = clampRating(Math.round((passScheming + runScheming) / 2) + randomInt(-4, 4));
+      const role = 'OC';
+      const reputation = randomInt(38, 72);
       return {
         name: randomCoachName(),
-        role: 'OC',
-        philosophy: pickOffensiveCoachPhilosophy(offensiveIdentity),
+        role,
+        philosophy: pickOCPhilosophy(passScheming, runScheming),
         developmentSpecialty: offensiveSpecialty,
         aggression: offenseStyle === 'PASS_HEAVY' ? randomInt(65, 92) : randomInt(30, 68),
-        reputation: randomInt(38, 72),
-        overall: Math.round((ocOffense + ocDefense) / 2),
-        offenseRating: ocOffense,
-        defenseRating: ocDefense,
+        reputation,
+        overall: Math.round((passScheming + runScheming + developmentRating) / 3),
+        offenseRating: passScheming,
+        defenseRating: runScheming,
+        developmentRating,
+        salary: coachSalary(role, reputation),
+        contractYearsLeft: 3,
+        contractTotalYears: 3,
+        contractTotalCost: coachSalary(role, reputation) * 3,
         hotSeat: randomInt(8, 28),
         age: randomInt(34, 58),
         teamId,
       };
     })(),
     (() => {
-      const dcOffense = clampRating(dcOvr + randomInt(-8, 0));
-      const dcDefense = clampRating(dcOvr + randomInt(0, 8));
+      // DC: offenseRating = run defense, defenseRating = pass defense
+      const runDefense  = clampRating(dcOvr + randomInt(-8, 12));
+      const passDefense = clampRating(dcOvr + randomInt(-8, 12));
+      const developmentRating = clampRating(Math.round((runDefense + passDefense) / 2) + randomInt(-4, 4));
+      const role = 'DC';
+      const reputation = randomInt(38, 72);
       return {
         name: randomCoachName(),
-        role: 'DC',
-        philosophy: pickDefensiveCoachPhilosophy(defensiveIdentity),
+        role,
+        philosophy: pickDCPhilosophy(runDefense, passDefense),
         developmentSpecialty: defensiveSpecialty,
         aggression: defenseStyle === 'AGGRESSIVE' ? randomInt(72, 95) : randomInt(28, 66),
-        reputation: randomInt(38, 72),
-        overall: Math.round((dcOffense + dcDefense) / 2),
-        offenseRating: dcOffense,
-        defenseRating: dcDefense,
+        reputation,
+        overall: Math.round((runDefense + passDefense + developmentRating) / 3),
+        offenseRating: runDefense,
+        defenseRating: passDefense,
+        developmentRating,
+        salary: coachSalary(role, reputation),
+        contractYearsLeft: 3,
+        contractTotalYears: 3,
+        contractTotalCost: coachSalary(role, reputation) * 3,
         hotSeat: randomInt(8, 28),
         age: randomInt(34, 60),
         teamId,

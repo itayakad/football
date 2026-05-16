@@ -3,9 +3,10 @@ import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-nati
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '../api/client';
-import { MarketPlayer, MarketResponse, RosterPlayer } from '../api/types';
+import { MarketResponse, RosterPlayer } from '../api/types';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
+import { ContractValue, formatMoney } from '../components/ContractValue';
 import { Pill, pillColor, pillLabel } from '../components/Pill';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
@@ -204,7 +205,7 @@ export const MarketScreen: React.FC = () => {
                 </View>
                 <View style={styles.staffSide}>
                   <Text style={styles.staffRep}>{coach.reputation}</Text>
-                  <Text style={typography.caption}>{formatMoney(coach.cost)}</Text>
+                  <ContractValue amount={coach.contract.totalCost} years={coach.contract.totalYears} compact />
                 </View>
               </View>
               <Button
@@ -267,8 +268,10 @@ function MarketCard({
       <Text style={[typography.caption, styles.story]}>{player.story}</Text>
       <View style={styles.marketMeta}>
         <Meta label="Price" value={formatMoney(listing.askingPrice)} />
-        <Meta label="Salary" value={formatMoney(player.contract.salary)} />
-        <Meta label="Deal" value={`${player.contract.yearsLeft}y`} />
+        <View style={styles.metaItem}>
+          <Text style={typography.label}>Contract</Text>
+          <ContractValue amount={player.contract.salary * player.contract.yearsLeft} years={player.contract.yearsLeft} compact />
+        </View>
         <Meta label="From" value={listing.sellerTeam.name.split(' ').slice(-1)[0]} />
       </View>
     </Card>
@@ -285,7 +288,8 @@ function TradeChipCard({ player, onList, disabled }: { player: RosterPlayer; onL
         </View>
         <View style={styles.playerInfo}>
           <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
-          <Text style={typography.caption} numberOfLines={1}>{player.archetype} / {player.contract.yearsLeft}y left</Text>
+          <Text style={typography.caption} numberOfLines={1}>{player.archetype}</Text>
+          <ContractValue amount={player.contract.salary * player.contract.yearsLeft} years={player.contract.yearsLeft} compact />
         </View>
         <Pressable disabled={disabled} onPress={onList} style={[styles.actionButton, disabled && styles.disabled]}>
           <Text style={[styles.actionText, { color: colors.warn }]}>List</Text>
@@ -315,12 +319,6 @@ function Meta({ label, value }: { label: string; value: string }) {
 
 function tradeChipScore(player: RosterPlayer): number {
   return (player.age >= 31 ? 12 : 0) + (player.contract.yearsLeft === 1 ? 10 : 0) + player.overall * 0.1;
-}
-
-function formatMoney(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  return `$${Math.round(value / 1_000)}K`;
 }
 
 const styles = StyleSheet.create({

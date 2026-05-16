@@ -257,9 +257,18 @@ export interface RosterResponse {
       overall:              number;
       offenseRating:        number;
       defenseRating:        number;
+      developmentRating:    number;
       careerWins:           number;
       careerLosses:         number;
       titles:               number;
+      salary:               number;
+      contractYearsLeft:    number;
+      contract: {
+        salary:     number;
+        yearsLeft:  number;
+        totalYears: number;
+        totalCost:  number;
+      };
       hotSeat:              number;
       yearsWithTeam:        number;
       age:                  number;
@@ -293,9 +302,18 @@ export interface CoachMarketResponse {
     overall:              number;
     offenseRating:        number;
     defenseRating:        number;
+    developmentRating:    number;
     careerWins:           number;
     careerLosses:         number;
     titles:               number;
+    salary:               number;
+    contractYearsLeft:    number;
+    contract: {
+      salary:     number;
+      yearsLeft:  number;
+      totalYears: number;
+      totalCost:  number;
+    };
     hotSeat:              number;
     yearsWithTeam:        number;
     age:                  number;
@@ -320,6 +338,17 @@ export interface MarketPlayer {
     salary:            number;
     extensionEligible: boolean;
   };
+  schemeFit: {
+    label:  'Excellent Fit' | 'Solid Fit' | 'Development Fit';
+    detail: string;
+  };
+}
+
+export interface PlayerFreeAgentResponse {
+  candidates: Array<MarketPlayer & {
+    attributes: Record<string, number>;
+    canSign: boolean;
+  }>;
 }
 
 export interface MarketResponse {

@@ -1,7 +1,7 @@
 import {
   MeResponse, DashboardResponse, MatchPreviewResponse, SimulateResponse, Gameplan,
   LeagueStandingsResponse, RosterResponse, MarketResponse, HistoryResponse,
-  OffseasonResponse, CoachMarketResponse,
+  OffseasonResponse, CoachMarketResponse, PlayerFreeAgentResponse,
   OffensivePhilosophy,
   SchemeUnit, TeamScheme,
 } from './types';
@@ -97,6 +97,15 @@ export const api = {
 
   market: (teamId: string) =>
     request<MarketResponse>(`/api/market?teamId=${teamId}`),
+
+  playerFreeAgents: (teamId: string, position: string, limit = 5) =>
+    request<PlayerFreeAgentResponse>(`/api/players/free-agents?teamId=${teamId}&position=${encodeURIComponent(position)}&limit=${limit}`),
+
+  signFreeAgent: (teamId: string, playerId: string) =>
+    request<{ ok: true }>(`/api/players/free-agents/${playerId}/sign`, {
+      method: 'POST',
+      body: JSON.stringify({ teamId }),
+    }),
 
   listPlayer: (teamId: string, playerId: string) =>
     request<{ id: string }>('/api/market/list', {

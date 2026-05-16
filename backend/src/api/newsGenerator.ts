@@ -353,6 +353,7 @@ async function findPlayerTensionStories(leagueId: string | undefined, currentWee
   const stories: NewsDraft[] = [];
 
   for (const player of players) {
+    if (!player.team) continue;
     const form = await teamFormSnapshot(player.team.id);
     const losingTeam = form.streakType === 'L' && form.streak >= 2;
     const contractTension = player.contractYearsLeft === 1 && player.overall >= 78;

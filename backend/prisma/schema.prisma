@@ -91,9 +91,14 @@ model Coach {
   overall               Int      @default(60)
   offenseRating         Int      @default(60)
   defenseRating         Int      @default(60)
+  developmentRating     Int      @default(60)
   careerWins            Int      @default(0)
   careerLosses          Int      @default(0)
   titles                Int      @default(0)
+  salary                Int      @default(1500000)
+  contractYearsLeft     Int      @default(3)
+  contractTotalYears    Int      @default(3)
+  contractTotalCost     Int      @default(4500000)
   hotSeat               Int      @default(20)
   yearsWithTeam         Int      @default(1)
   age                   Int      @default(48)
@@ -116,8 +121,8 @@ model Player {
   salary             Int     @default(2500000)
   contractYearsLeft  Int     @default(2)
   extensionEligible  Boolean @default(false)
-  teamId             String
-  team               Team    @relation(fields: [teamId], references: [id])
+  teamId             String?
+  team               Team?   @relation(fields: [teamId], references: [id])
   transferListing    TransferListing?
 }
 

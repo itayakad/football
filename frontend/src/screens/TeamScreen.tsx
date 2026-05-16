@@ -12,7 +12,8 @@ import { NavigationProp, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
-import { DefensiveIdentity, MarketResponse, OffensiveIdentity, RosterPlayer, RosterResponse } from '../api/types';
+import { DefensiveIdentity, OffensiveIdentity, PlayerFreeAgentResponse, RosterPlayer, RosterResponse } from '../api/types';
+import { ContractValue, formatMoney } from '../components/ContractValue';
 import { ProfileSheet } from '../components/ProfileSheet';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useUserTeamId } from '../state/userTeam';
@@ -22,6 +23,7 @@ import { teamArchetypeLabel } from '../utils/teamArchetype';
 
 type RosterGroup = RosterResponse['groups'][number];
 type Coach = RosterResponse['team']['coaches'][number];
+type PlayerFreeAgent = PlayerFreeAgentResponse['candidates'][number];
 type Unit = 'offense' | 'defense';
 type Slot = { id: string; label: string; player?: RosterPlayer };
 
@@ -53,17 +55,17 @@ export const TeamScreen: React.FC = () => {
     enabled: !!userTeamId,
   });
 
-  const { data: marketData } = useQuery({
-    queryKey: ['market', userTeamId],
-    queryFn: () => api.market(userTeamId!),
-    enabled: !!userTeamId,
+  const { data: freeAgentData } = useQuery({
+    queryKey: ['playerFreeAgents', userTeamId, selectedPlayer?.position],
+    queryFn: () => api.playerFreeAgents(userTeamId!, selectedPlayer!.position, 5),
+    enabled: !!userTeamId && !!selectedPlayer,
   });
 
-  const buyListing = useMutation({
-    mutationFn: (listingId: string) => api.buyListing(listingId, userTeamId!),
+  const signFreeAgent = useMutation({
+    mutationFn: (playerId: string) => api.signFreeAgent(userTeamId!, playerId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['roster', userTeamId] });
-      queryClient.invalidateQueries({ queryKey: ['market', userTeamId] });
+      queryClient.invalidateQueries({ queryKey: ['playerFreeAgents', userTeamId] });
       queryClient.invalidateQueries({ queryKey: ['dashboard', userTeamId] });
       setSelectedPlayer(null);
     },
@@ -103,6 +105,9 @@ export const TeamScreen: React.FC = () => {
   const defenseSlots = buildDefenseSlots(allPlayers);
   const starterIds = new Set([...offenseSlots, ...defenseSlots].map((slot) => slot.player?.id).filter(Boolean));
   const activeSlots = unit === 'offense' ? offenseSlots : defenseSlots;
+  const capPct = Math.min(100, Math.round((data.team.salaryUsed / data.team.salaryCap) * 100));
+  const capTone = capPct > 92 ? colors.warn : colors.accent.primary;
+  const capSpace = data.team.salaryCap - data.team.salaryUsed;
 
   const isStarter = selectedPlayer ? starterIds.has(selectedPlayer.id) : false;
   let subOptions: RosterPlayer[] = [];
@@ -114,15 +119,8 @@ export const TeamScreen: React.FC = () => {
       subOptions = samePosition.filter(p => starterIds.has(p.id));
     }
   }
-
-  let topMarketListing: MarketResponse['listings'][0] | null = null;
-  if (selectedPlayer && subOptions.length === 0 && marketData) {
-    const validListings = marketData.listings.filter(l => l.player.position === selectedPlayer.position);
-    if (validListings.length > 0) {
-      validListings.sort((a, b) => b.player.overall - a.player.overall);
-      topMarketListing = validListings[0];
-    }
-  }
+  const benchSubOptions = subOptions.slice(0, 5);
+  const freeAgentOptions = (freeAgentData?.candidates ?? []).slice(0, Math.max(0, 5 - benchSubOptions.length));
 
   const swapPlayers = (player1: RosterPlayer, player2: RosterPlayer) => {
     const groupKey = GROUP_BY_POSITION[player1.position];
@@ -197,27 +195,22 @@ export const TeamScreen: React.FC = () => {
       )}
 
       <View style={styles.rosterPanel}>
-        <View style={styles.unitHeader}>
-          <View style={styles.segmented}>
-            <UnitButton label="Offense" active={unit === 'offense'} onPress={() => setUnit('offense')} />
-            <UnitButton label="Defense" active={unit === 'defense'} onPress={() => setUnit('defense')} />
-          </View>
-        </View>
         <View style={styles.field}>
           <View style={styles.yardLineTop} />
           <View style={styles.yardLineMiddle} />
           <View style={styles.yardLineBottom} />
 
-          <Pressable
-            onPress={() => navigation.navigate('ChooseScheme', { unit })}
-            style={({ pressed }) => [styles.schemeButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.schemeButtonText}>Change {unit === 'offense' ? 'Offensive' : 'Defensive'} Scheme</Text>
-          </Pressable>
+          <View style={styles.capSummary}>
+            <Text style={styles.capSummaryLabel}>Cap Space</Text>
+            <Text style={styles.capSummaryValue}>{formatMoney(capSpace)}</Text>
+            <View style={styles.capTrack}>
+              <View style={[styles.capFill, { width: `${capPct}%`, backgroundColor: capTone }]} />
+            </View>
+          </View>
 
           {unit === 'offense' ? (
             <>
-              {/* Row 1: line of scrimmage — LT LG C RG RT */}
+              {/* Row 1: line of scrimmage — T G C G T */}
               <View style={styles.fieldRow}>
                 {activeSlots.slice(0, 5).map((slot) => (
                   <StarterCard
@@ -228,9 +221,9 @@ export const TeamScreen: React.FC = () => {
                   />
                 ))}
               </View>
-              {/* Row 2: receivers — WR WR WR TE */}
+              {/* Row 2: receivers — WR WR TE */}
               <View style={styles.fieldRow}>
-                {activeSlots.slice(5, 9).map((slot) => (
+                {activeSlots.slice(5, 8).map((slot) => (
                   <StarterCard
                     key={slot.id}
                     slot={slot}
@@ -240,7 +233,7 @@ export const TeamScreen: React.FC = () => {
               </View>
               {/* Row 3: backfield — RB QB RB */}
               <View style={styles.fieldRow}>
-                {activeSlots.slice(9, 12).map((slot) => (
+                {activeSlots.slice(8, 11).map((slot) => (
                   <StarterCard
                     key={slot.id}
                     slot={slot}
@@ -281,16 +274,30 @@ export const TeamScreen: React.FC = () => {
               </View>
             </>
           )}
+
+          <Pressable
+            onPress={() => navigation.navigate('ChooseScheme', { unit })}
+            style={({ pressed }) => [styles.schemeButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.schemeButtonText}>Change {unit === 'offense' ? 'Offensive' : 'Defensive'} Scheme</Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.unitHeader}>
+        <View style={styles.segmented}>
+          <UnitButton label="Offense" active={unit === 'offense'} onPress={() => setUnit('offense')} />
+          <UnitButton label="Defense" active={unit === 'defense'} onPress={() => setUnit('defense')} />
         </View>
       </View>
 
       <PlayerProfile
         player={selectedPlayer}
-        subOptions={subOptions}
-        topMarketListing={topMarketListing}
-        buying={buyListing.isPending}
+        subOptions={benchSubOptions}
+        freeAgentOptions={freeAgentOptions}
+        signing={signFreeAgent.isPending}
         onSub={swapPlayers}
-        onBuyMarket={(listingId) => buyListing.mutate(listingId)}
+        onSignFreeAgent={(playerId) => signFreeAgent.mutate(playerId)}
         onClose={() => setSelectedPlayer(null)}
       />
       <CoachProfile coach={selectedCoach} onClose={() => setSelectedCoach(null)} />
@@ -301,21 +308,20 @@ export const TeamScreen: React.FC = () => {
 function buildOffenseSlots(players: RosterPlayer[]): Slot[] {
   const byPosition = playersByPosition(players);
   return [
-    // Row 1: line of scrimmage — LT LG C RG RT
-    { id: 'lt', label: 'LT', player: byPosition.OL?.[0] },
-    { id: 'lg', label: 'LG', player: byPosition.OL?.[1] },
+    // Row 1: line of scrimmage — T G C G T
+    { id: 'lt', label: 'T', player: byPosition.OL?.[0] },
+    { id: 'lg', label: 'G', player: byPosition.OL?.[1] },
     { id: 'c', label: 'C', player: byPosition.OL?.[2] },
-    { id: 'rg', label: 'RG', player: byPosition.OL?.[3] },
-    { id: 'rt', label: 'RT', player: byPosition.OL?.[4] },
-    // Row 2: receivers — WR1 WR2 WR3 TE
-    { id: 'wr1', label: 'WR1', player: byPosition.WR?.[0] },
-    { id: 'wr2', label: 'WR2', player: byPosition.WR?.[1] },
-    { id: 'wr3', label: 'WR3', player: byPosition.WR?.[2] },
+    { id: 'rg', label: 'G', player: byPosition.OL?.[3] },
+    { id: 'rt', label: 'T', player: byPosition.OL?.[4] },
+    // Row 2: receivers — WR WR TE
+    { id: 'wr1', label: 'WR', player: byPosition.WR?.[0] },
+    { id: 'wr2', label: 'WR', player: byPosition.WR?.[1] },
     { id: 'te1', label: 'TE', player: byPosition.TE?.[0] },
-    // Row 3: backfield — RB1 QB RB2
-    { id: 'rb1', label: 'RB1', player: byPosition.RB?.[0] },
+    // Row 3: backfield — RB QB RB
+    { id: 'rb1', label: 'RB', player: byPosition.RB?.[0] },
     { id: 'qb1', label: 'QB', player: byPosition.QB?.[0] },
-    { id: 'rb2', label: 'RB2', player: byPosition.RB?.[1] },
+    { id: 'rb2', label: 'RB', player: byPosition.RB?.[1] },
   ];
 }
 
@@ -391,7 +397,6 @@ function StarterCard({
         <Text style={styles.cardAvatarText}>{player ? initials(player.name) : '?'}</Text>
       </View>
       <Text style={styles.cardName} numberOfLines={1}>{player?.name.split(' ').slice(-1)[0] ?? 'Empty'}</Text>
-      <Text style={styles.cardArchetype} numberOfLines={1}>{player?.archetype ?? 'No player'}</Text>
     </Pressable>
   );
 }
@@ -399,18 +404,18 @@ function StarterCard({
 function PlayerProfile({
   player,
   subOptions,
-  topMarketListing,
-  buying,
+  freeAgentOptions,
+  signing,
   onSub,
-  onBuyMarket,
+  onSignFreeAgent,
   onClose,
 }: {
   player: RosterPlayer | null;
   subOptions: RosterPlayer[];
-  topMarketListing?: MarketResponse['listings'][0] | null;
-  buying: boolean;
+  freeAgentOptions: PlayerFreeAgent[];
+  signing: boolean;
   onSub: (playerA: RosterPlayer, playerB: RosterPlayer) => void;
-  onBuyMarket: (listingId: string) => void;
+  onSignFreeAgent: (playerId: string) => void;
   onClose: () => void;
 }) {
   const [showSub, setShowSub] = React.useState(false);
@@ -441,8 +446,10 @@ function PlayerProfile({
     >
       {showSub ? (
         <ScrollView contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
-          {subOptions.length > 0 ? (
-            subOptions.map((subOpt) => {
+          {subOptions.length + freeAgentOptions.length > 0 ? (
+            <>
+            {subOptions.length > 0 && <Text style={styles.subSectionHeader}>Bench</Text>}
+            {subOptions.map((subOpt) => {
               const isExpanded = expandedSubId === subOpt.id;
               const lastName = subOpt.name.split(' ').slice(1).join(' ');
               return (
@@ -452,7 +459,11 @@ function PlayerProfile({
                     onPress={() => setExpandedSubId(isExpanded ? null : subOpt.id)}
                   >
                     <View style={styles.fireCandidateAvatar}>
-                      <Text style={styles.cardAvatarText}>{initials(subOpt.name)}</Text>
+                      <Ionicons
+                        name={schemeFitIcon(subOpt.schemeFit.label)}
+                        size={20}
+                        color={schemeFitColor(subOpt.schemeFit.label)}
+                      />
                     </View>
                     <Text style={[typography.body, styles.fireCandidateNameCol]} numberOfLines={1}>
                       {subOpt.name.charAt(0)}. {lastName}
@@ -463,11 +474,14 @@ function PlayerProfile({
                   {isExpanded && (
                     <View style={styles.fireExpand}>
                       <View style={styles.fireExpandHeader}>
-                        <View style={styles.fireExpandIcon}>
-                          <Text style={styles.fireExpandIconText}>{initials(subOpt.name)}</Text>
+                        <View style={styles.fireExpandAvatarCol}>
+                          <View style={styles.fireExpandIcon}>
+                            <Text style={styles.fireExpandIconText}>{initials(subOpt.name)}</Text>
+                          </View>
+                          <Text style={styles.fireExpandAge}>Age: {subOpt.age}</Text>
                         </View>
                         <View style={styles.fireExpandBars}>
-                          <RatingBar label="OVR" value={subOpt.overall} thick />
+                          <RatingBar label="Overall" value={subOpt.overall} thick />
                           {Object.entries(subOpt.attributes).map(([label, value]) => (
                             <AttributeBar key={label} label={label} value={value} />
                           ))}
@@ -483,50 +497,62 @@ function PlayerProfile({
                   )}
                 </View>
               );
-            })
-          ) : (
-            <View style={{ gap: spacing.md }}>
-              <Text style={typography.caption}>No eligible players to sub.</Text>
-              {topMarketListing && (
-                <View style={[styles.fireCandidateCard, expandedSubId === topMarketListing.id && styles.fireCandidateCardExpanded]}>
+            })}
+            {freeAgentOptions.length > 0 && <Text style={styles.subSectionHeader}>Free Agents</Text>}
+            {freeAgentOptions.map((freeAgent) => {
+              const isExpanded = expandedSubId === freeAgent.id;
+              return (
+                <View key={freeAgent.id} style={[styles.fireCandidateCard, isExpanded && styles.fireCandidateCardExpanded]}>
                   <Pressable
                     style={styles.fireCandidateRow}
-                    onPress={() => setExpandedSubId(expandedSubId === topMarketListing.id ? null : topMarketListing.id)}
+                    onPress={() => setExpandedSubId(isExpanded ? null : freeAgent.id)}
                   >
                     <View style={styles.fireCandidateAvatar}>
-                      <Text style={styles.cardAvatarText}>{initials(topMarketListing.player.name)}</Text>
+                      <Ionicons
+                        name={freeAgent.schemeFit ? schemeFitIcon(freeAgent.schemeFit.label) : 'person-add-outline'}
+                        size={20}
+                        color={freeAgent.schemeFit ? schemeFitColor(freeAgent.schemeFit.label) : colors.accent.primary}
+                      />
                     </View>
                     <Text style={[typography.body, styles.fireCandidateNameCol]} numberOfLines={1}>
-                      {topMarketListing.player.name.charAt(0)}. {topMarketListing.player.name.split(' ').slice(1).join(' ')}
+                      {freeAgent.name.charAt(0)}. {freeAgent.name.split(' ').slice(1).join(' ')}
                     </Text>
                     <View style={styles.fireCandidateSpacer} />
-                    <Text style={[styles.fireCandidateCost, styles.fireCandidateCostCol]}>{formatSalary(topMarketListing.askingPrice)}</Text>
-                    <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{topMarketListing.player.overall}</Text>
+                    <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{freeAgent.overall}</Text>
                   </Pressable>
-                  {expandedSubId === topMarketListing.id && (
+                  {isExpanded && (
                     <View style={styles.fireExpand}>
                       <View style={styles.fireExpandHeader}>
-                        <View style={styles.fireExpandIcon}>
-                          <Text style={styles.fireExpandIconText}>{initials(topMarketListing.player.name)}</Text>
+                        <View style={styles.fireExpandAvatarCol}>
+                          <View style={styles.fireExpandIcon}>
+                            <Text style={styles.fireExpandIconText}>{initials(freeAgent.name)}</Text>
+                          </View>
+                          <Text style={styles.fireExpandAge}>Age: {freeAgent.age}</Text>
                         </View>
                         <View style={styles.fireExpandBars}>
-                          <RatingBar label="OVR" value={topMarketListing.player.overall} thick />
+                          <RatingBar label="Overall" value={freeAgent.overall} thick />
+                          {Object.entries(freeAgent.attributes).map(([label, value]) => (
+                            <AttributeBar key={label} label={label} value={value} />
+                          ))}
                         </View>
                       </View>
                       <Pressable
-                        style={[styles.hireButton, (!topMarketListing.canBuy || buying) && styles.hireButtonDisabled]}
-                        disabled={!topMarketListing.canBuy || buying}
-                        onPress={() => onBuyMarket(topMarketListing.id)}
+                        style={[styles.hireButton, (!freeAgent.canSign || signing) && styles.hireButtonDisabled]}
+                        disabled={!freeAgent.canSign || signing}
+                        onPress={() => onSignFreeAgent(freeAgent.id)}
                       >
                         <Text style={styles.hireButtonText}>
-                          {buying ? '...' : topMarketListing.canBuy ? 'Buy' : 'No Cash'}
+                          {signing ? '...' : freeAgent.canSign ? 'Sign' : 'No Cap'}
                         </Text>
                       </Pressable>
                     </View>
                   )}
                 </View>
-              )}
-            </View>
+              );
+            })}
+            </>
+          ) : (
+            <Text style={typography.caption}>No eligible players available.</Text>
           )}
         </ScrollView>
       ) : (
@@ -542,10 +568,14 @@ function PlayerProfile({
                 />
               </View>
               <View style={{ flex: 1 }} />
-              <Text style={typography.caption}>Contract {player.contract.yearsLeft}y</Text>
+              <ContractValue
+                amount={player.contract.salary * player.contract.yearsLeft}
+                years={player.contract.yearsLeft}
+                compact
+              />
             </View>
 
-            <RatingBar label="OVR" value={player.overall} thick />
+            <RatingBar label="Overall" value={player.overall} thick />
             {Object.entries(player.attributes).map(([label, value]) => (
               <AttributeBar key={label} label={label} value={value} />
             ))}
@@ -577,7 +607,6 @@ function StaffCard({ coach, onPress }: { coach: Coach; onPress: () => void }) {
         <Text style={styles.cardAvatarText}>{initials(coach.name)}</Text>
       </View>
       <Text style={styles.cardName} numberOfLines={1}>{coach.name}</Text>
-      <Text style={styles.cardArchetype} numberOfLines={1}>{coach.philosophy}</Text>
     </Pressable>
   );
 }
@@ -658,22 +687,30 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
                       {candidate.name.charAt(0)}. {candidate.name.split(' ').slice(1).join(' ')}
                     </Text>
                     <View style={styles.fireCandidateSpacer} />
-                    <Text style={[styles.fireCandidateCost, styles.fireCandidateCostCol]}>{formatSalary(candidate.cost)}</Text>
+                    <View style={styles.fireCandidateCostCol}>
+                      <ContractValue amount={candidate.contract.totalCost} years={candidate.contract.totalYears} compact />
+                    </View>
                     <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{candidate.overall}</Text>
                   </Pressable>
                   {isExpanded && (
                     <View style={styles.fireExpand}>
                       <View style={styles.fireExpandHeader}>
-                        <View style={styles.fireExpandIcon}>
-                          <Text style={styles.fireExpandIconText}>{initials(candidate.name)}</Text>
+                        <View style={styles.fireExpandAvatarCol}>
+                          <View style={styles.fireExpandIcon}>
+                            <Text style={styles.fireExpandIconText}>{initials(candidate.name)}</Text>
+                          </View>
+                          <Text style={styles.fireExpandAge}>Age: {candidate.age}</Text>
                         </View>
                         <View style={styles.fireExpandBars}>
-                          <RatingBar label="OVR" value={candidate.overall} thick />
+                          <RatingBar label="Overall" value={candidate.overall} thick />
                           {candidate.role !== 'DC' && (
-                            <RatingBar label="OFF" value={candidate.offenseRating} />
+                            <RatingBar label="Offense" value={candidate.offenseRating} />
                           )}
                           {candidate.role !== 'OC' && (
-                            <RatingBar label="DEF" value={candidate.defenseRating} />
+                            <RatingBar label="Defense" value={candidate.defenseRating} />
+                          )}
+                          {candidate.role !== 'HEAD_COACH' && (
+                            <RatingBar label="Development" value={candidate.developmentRating} />
                           )}
                         </View>
                       </View>
@@ -707,14 +744,21 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
                   color={coachPlayStyleColor(coach)}
                 />
               </View>
+              <View style={{ flex: 1 }} />
+              <ContractValue amount={coach.contract.totalCost} years={coach.contract.totalYears} compact />
             </View>
 
-            <RatingBar label="OVR" value={coach.overall} thick />
-            {coach.role !== 'DC' && (
-              <RatingBar label="OFF" value={coach.offenseRating} />
-            )}
-            {coach.role !== 'OC' && (
-              <RatingBar label="DEF" value={coach.defenseRating} />
+            <RatingBar label="Overall" value={coach.overall} thick />
+            <RatingBar
+              label={coach.role === 'OC' ? 'Pass Scheming' : coach.role === 'DC' ? 'Run Defense' : 'Offense'}
+              value={coach.offenseRating}
+            />
+            <RatingBar
+              label={coach.role === 'OC' ? 'Run Scheming' : coach.role === 'DC' ? 'Pass Defense' : 'Defense'}
+              value={coach.defenseRating}
+            />
+            {coach.role !== 'HEAD_COACH' && (
+              <RatingBar label="Development" value={coach.developmentRating} />
             )}
           </View>
 
@@ -731,25 +775,31 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
 }
 
 const OFFENSIVE_PHILOSOPHY_IDENTITY: Record<string, OffensiveIdentity> = {
-  'Vertical Architect': 'VERTICAL',
-  'Downfield Creator': 'VERTICAL',
+  // OC philosophies (new ratio-based)
   'Air Raid Maestro': 'PASS_HEAVY',
+  'Vertical Architect': 'VERTICAL',
   'Route Chemist': 'PASS_HEAVY',
-  'Ground Game Designer': 'RUN_HEAVY',
-  'Trench Conductor': 'RUN_HEAVY',
+  'Downfield Creator': 'VERTICAL',
   'Tempo Mixer': 'BALANCED',
   'Balance Builder': 'BALANCED',
+  'Ground Game Designer': 'RUN_HEAVY',
+  'Trench Conductor': 'RUN_HEAVY',
+  'Smashmouth Specialist': 'RUN_HEAVY',
+  'Power Run Guru': 'RUN_HEAVY',
 };
 
 const DEFENSIVE_PHILOSOPHY_IDENTITY: Record<string, DefensiveIdentity> = {
-  'Blitz Designer': 'PRESSURE',
-  'Chaos Coordinator': 'PRESSURE',
-  'Island Sculptor': 'MAN_HEAVY',
-  'Matchup Eraser': 'MAN_HEAVY',
-  'Coverage Sculptor': 'ZONE_HEAVY',
-  'Shell Master': 'ZONE_HEAVY',
+  // DC philosophies (new ratio-based)
+  'Run Stuffer': 'BALANCED',
+  'Gap Destroyer': 'PRESSURE',
+  'Front Seven Anchor': 'BALANCED',
+  'Downhill Stopper': 'BALANCED',
   'Adjustment Artist': 'BALANCED',
   'Two-Level Organizer': 'BALANCED',
+  'Coverage Sculptor': 'ZONE_HEAVY',
+  'Shell Master': 'ZONE_HEAVY',
+  'Blitz Designer': 'PRESSURE',
+  'Chaos Coordinator': 'PRESSURE',
 };
 
 type HCLean = 'VERY_OFFENSE' | 'OFFENSE' | 'BALANCED' | 'DEFENSE' | 'VERY_DEFENSE';
@@ -941,10 +991,6 @@ function playerPositionLabel(position: string): string {
   return labels[position] ?? position;
 }
 
-function formatSalary(value: number): string {
-  return `$${(value / 1_000_000).toFixed(1)}M`;
-}
-
 function initials(name: string): string {
   return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
 }
@@ -1040,6 +1086,35 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
   },
+  capSummary: {
+    width: '92%',
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  capSummaryLabel: {
+    ...typography.label,
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+  },
+  capSummaryValue: {
+    ...typography.caption,
+    color: colors.text.primary,
+    fontWeight: '800',
+    minWidth: 58,
+  },
+  capTrack: {
+    flex: 1,
+    height: 7,
+    borderRadius: radius.pill,
+    backgroundColor: colors.bg.surface,
+    overflow: 'hidden',
+  },
+  capFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+  },
   identityIconRow: {
     flexDirection: 'row',
     gap: 4,
@@ -1089,7 +1164,7 @@ const styles = StyleSheet.create({
   },
   staffCard: {
     width: '31.5%',
-    minHeight: 112,
+    minHeight: 116,
     borderRadius: radius.md,
     padding: spacing.sm,
     backgroundColor: colors.bg.elevated,
@@ -1103,6 +1178,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  staffCardFooter: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 2,
   },
   rosterPanel: {
     flex: 1,
@@ -1183,8 +1263,8 @@ const styles = StyleSheet.create({
   },
   starterCard: {
     flex: 1,
-    maxWidth: 86,
-    minHeight: 118,
+    maxWidth: 100,
+    minHeight: 120,
     borderRadius: radius.md,
     padding: spacing.sm,
     backgroundColor: colors.bg.elevated,
@@ -1194,13 +1274,12 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   starterCardCompact: {
-    maxWidth: 62,
-    minHeight: 108,
+    maxWidth: 72,
+    minHeight: 110,
     paddingHorizontal: spacing.xs,
   },
   starterCardFeatured: {
-    maxWidth: 96,
-    borderColor: colors.accent.primary,
+    maxWidth: 110,
   },
   starterTop: {
     width: '100%',
@@ -1320,6 +1399,12 @@ const styles = StyleSheet.create({
   fireCandidateCardExpanded: {
     borderColor: colors.accent.primary,
   },
+  subSectionHeader: {
+    ...typography.label,
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
   fireCandidateRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1336,9 +1421,13 @@ const styles = StyleSheet.create({
   },
   fireExpandHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacing.md,
     paddingTop: spacing.md,
+  },
+  fireExpandAvatarCol: {
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   fireExpandIcon: {
     width: 52,
@@ -1353,6 +1442,11 @@ const styles = StyleSheet.create({
   fireExpandIconText: {
     ...typography.heading,
     color: colors.text.secondary,
+  },
+  fireExpandAge: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontWeight: '800',
   },
   fireExpandBars: {
     flex: 1,
@@ -1390,8 +1484,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fireCandidateCostCol: {
-    width: 60,
-    textAlign: 'right',
+    width: 96,
+    alignItems: 'flex-end',
   },
   fireCandidateOvrCol: {
     width: 32,
@@ -1406,11 +1500,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg.elevated,
     borderWidth: 1,
     borderColor: colors.border,
-  },
-  fireCandidateCost: {
-    ...typography.caption,
-    color: colors.text.secondary,
-    fontWeight: '700',
   },
   statRow: {
     flexDirection: 'row',

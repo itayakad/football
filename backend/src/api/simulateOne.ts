@@ -22,7 +22,7 @@ export interface SingleMatchResult {
 }
 
 const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
-  QB: 1, RB: 2, WR: 3, TE: 1, OL: 5, DE: 2, DT: 2, LB: 3, CB: 3, S: 2,
+  QB: 1, RB: 2, WR: 2, TE: 1, OL: 5, DE: 2, DT: 2, LB: 3, CB: 3, S: 2,
 };
 
 function activeDepthPlayers<T extends { id: string; position: string; overall: number; depthOrder?: number | null }>(players: T[]): T[] {

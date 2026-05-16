@@ -309,10 +309,10 @@ function ReplacePlaySheet({
             <PlaySketch play={play} />
 
             <View style={styles.playerChipRow}>
-              {play.keySlots.map((slot) => {
+              {play.keySlots.map((slot, index) => {
                 const player = slotMap[slot];
                 return (
-                  <View key={slot} style={styles.playerChip}>
+                  <View key={`${slot}-${index}`} style={styles.playerChip}>
                     <View style={styles.playerIcon}>
                       <Text style={styles.playerIconText}>{player ? initials(player.name) : slot.slice(0, 2)}</Text>
                     </View>
@@ -414,15 +414,11 @@ function buildSlotMap(players: RosterPlayer[]): Record<string, RosterPlayer | un
   return {
     QB: qb[0],
     RB: rb[0],
-    WR1: wr[0],
-    WR2: wr[1],
-    SLOT: wr[2],
+    WR: wr[0],
     TE: te[0],
-    LT: ol[0],
-    LG: ol[1],
+    T: ol[0],
+    G: ol[1],
     C: ol[2],
-    RG: ol[3],
-    RT: ol[4],
     EDGE1: de[0],
     EDGE2: de[1],
     DT1: dt[0],

@@ -5,12 +5,10 @@ import { computeLeagueAwards, LeagueAwards } from './awards';
 import { runLeaguePlayoffs, LeaguePlayoffBracket } from './playoffs';
 import {
   defenseStyleForCoachPhilosophy,
-  defensiveIdentityForStyle,
   offenseStyleForCoachPhilosophy,
-  offensiveIdentityForStyle,
-  pickDefensiveCoachPhilosophy,
+  pickDCPhilosophy,
   pickHeadCoachPhilosophy,
-  pickOffensiveCoachPhilosophy,
+  pickOCPhilosophy,
 } from './coachPhilosophy';
 import { deriveTeamIdentity, TeamIdentity } from './teamIdentity';
 
@@ -199,10 +197,11 @@ async function applyPromotionRelegation(
 }
 
 async function applyPlayerLifecycle(season: number): Promise<Retirement[]> {
-  const players = await prisma.player.findMany({ include: { team: true } });
+  const players = await prisma.player.findMany({ where: { teamId: { not: null } }, include: { team: true } });
   const retirements: Retirement[] = [];
 
   for (const player of players) {
+    if (!player.team || !player.teamId) continue;
     const newAge = player.age + 1;
     const shouldRetire =
       newAge >= 37 ||
@@ -242,12 +241,13 @@ async function applyPlayerLifecycle(season: number): Promise<Retirement[]> {
 }
 
 async function applyProgressionAndContracts(): Promise<Progression> {
-  const players = await prisma.player.findMany({ include: { team: { include: { coaches: true } } } });
+  const players = await prisma.player.findMany({ where: { teamId: { not: null } }, include: { team: { include: { coaches: true } } } });
   let improved = 0;
   let declined = 0;
   let freeAgentsListed = 0;
 
   for (const player of players) {
+    if (!player.team || !player.teamId) continue;
     const staff = player.team.coaches;
     const specialtyBoost = staff.some((coach) => coach.developmentSpecialty === playerDevelopmentGroup(player.position)) ? 1 : 0;
     const growth =
@@ -439,38 +439,60 @@ function playerDevelopmentGroup(position: string): string {
 }
 
 function buildReplacementCoach(teamId: string, role: string, offenseStyle: string, defenseStyle: string, identity?: TeamIdentity) {
-  const offensiveIdentity = identity?.offense ?? offensiveIdentityForStyle(offenseStyle);
-  const defensiveIdentity = identity?.defense ?? defensiveIdentityForStyle(defenseStyle);
   const specialty =
     role === 'OC' ? (offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : 'Skill') :
     role === 'DC' ? (defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? 'DL' : 'LB') :
     ['QB', 'Skill', 'OL', 'DL', 'LB', 'Secondary'][Math.floor(Math.random() * 6)];
   const baseRating = 50 + Math.floor(Math.random() * 20);
-  const offenseRating =
-    role === 'OC' ? Math.min(100, baseRating + 4 + Math.floor(Math.random() * 8)) :
-    role === 'DC' ? Math.max(0, baseRating - 4 - Math.floor(Math.random() * 8)) :
-    Math.max(0, Math.min(100, baseRating + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
-  const defenseRating =
-    role === 'DC' ? Math.min(100, baseRating + 4 + Math.floor(Math.random() * 8)) :
-    role === 'OC' ? Math.max(0, baseRating - 4 - Math.floor(Math.random() * 8)) :
-    Math.max(0, Math.min(100, baseRating + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
+  let offenseRating: number;
+  let defenseRating: number;
+  if (role === 'OC') {
+    // offenseRating = pass scheming, defenseRating = run scheming
+    offenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+    defenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+  } else if (role === 'DC') {
+    // offenseRating = run defense, defenseRating = pass defense
+    offenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+    defenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
+  } else {
+    offenseRating = Math.max(35, Math.min(99, baseRating + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
+    defenseRating = Math.max(35, Math.min(99, baseRating + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
+  }
+  const developmentRating =
+    role === 'OC' || role === 'DC'
+      ? Math.max(35, Math.min(99, Math.round((offenseRating + defenseRating) / 2) + Math.floor(Math.random() * 9) - 4))
+      : Math.round((offenseRating + defenseRating) / 2);
+  const reputation = 42 + Math.floor(Math.random() * 24);
   return {
     name: `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`,
     role,
     philosophy:
-      role === 'OC' ? pickOffensiveCoachPhilosophy(offensiveIdentity) :
-      role === 'DC' ? pickDefensiveCoachPhilosophy(defensiveIdentity) :
+      role === 'OC' ? pickOCPhilosophy(offenseRating, defenseRating) :
+      role === 'DC' ? pickDCPhilosophy(offenseRating, defenseRating) :
       role === 'HEAD_COACH' ? pickHeadCoachPhilosophy(offenseRating, defenseRating) :
       'Balanced Playcaller',
     developmentSpecialty: specialty,
     aggression: defenseStyle === 'AGGRESSIVE' ? 76 : offenseStyle === 'PASS_HEAVY' ? 70 : 52,
-    reputation: 42 + Math.floor(Math.random() * 24),
-    overall: Math.round((offenseRating + defenseRating) / 2),
+    reputation,
+    overall:
+      role === 'OC' || role === 'DC'
+        ? Math.round((offenseRating + defenseRating + developmentRating) / 3)
+        : Math.round((offenseRating + defenseRating) / 2),
     offenseRating,
     defenseRating,
+    developmentRating,
+    salary: coachSalary(role, reputation),
+    contractYearsLeft: role === 'HEAD_COACH' ? 4 : 3,
+    contractTotalYears: role === 'HEAD_COACH' ? 4 : 3,
+    contractTotalCost: coachSalary(role, reputation) * (role === 'HEAD_COACH' ? 4 : 3),
     hotSeat: 18 + Math.floor(Math.random() * 18),
     yearsWithTeam: 1,
     age: 34 + Math.floor(Math.random() * 22),
     teamId,
   };
+}
+
+function coachSalary(role: string, reputation: number, titles = 0): number {
+  const rolePremium = role === 'HEAD_COACH' ? 1.8 : 1.0;
+  return Math.round((1_500_000 + reputation * reputation * 2_200 * rolePremium + titles * 850_000) / 100_000) * 100_000;
 }

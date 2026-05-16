@@ -1,21 +1,65 @@
 import { DefensiveIdentity, OffensiveIdentity } from './teamIdentity';
 
-export const OFFENSIVE_COACH_PHILOSOPHIES: Record<OffensiveIdentity, readonly [string, string]> = {
-  VERTICAL:   ['Vertical Architect', 'Downfield Creator'],
-  PASS_HEAVY: ['Air Raid Maestro', 'Route Chemist'],
-  RUN_HEAVY:  ['Ground Game Designer', 'Trench Conductor'],
-  BALANCED:   ['Tempo Mixer', 'Balance Builder'],
+// ── OC Philosophies ──────────────────────────────────────────
+// Driven by the ratio of pass scheming (offenseRating) vs run scheming (defenseRating).
+// 5 tiers × 2 variants = 10 unique philosophies.
+
+export type OCLean = 'VERY_PASS' | 'PASS' | 'BALANCED' | 'RUN' | 'VERY_RUN';
+
+export const OC_PHILOSOPHIES: Record<OCLean, readonly [string, string]> = {
+  VERY_PASS: ['Air Raid Maestro', 'Vertical Architect'],
+  PASS:      ['Route Chemist', 'Downfield Creator'],
+  BALANCED:  ['Tempo Mixer', 'Balance Builder'],
+  RUN:       ['Ground Game Designer', 'Trench Conductor'],
+  VERY_RUN:  ['Smashmouth Specialist', 'Power Run Guru'],
 };
 
-export const DEFENSIVE_COACH_PHILOSOPHIES: Record<DefensiveIdentity, readonly [string, string]> = {
-  PRESSURE:   ['Blitz Designer', 'Chaos Coordinator'],
-  MAN_HEAVY:  ['Island Sculptor', 'Matchup Eraser'],
-  ZONE_HEAVY: ['Coverage Sculptor', 'Shell Master'],
-  BALANCED:   ['Adjustment Artist', 'Two-Level Organizer'],
+export function ocLeanFromRatings(passScheming: number, runScheming: number): OCLean {
+  const diff = passScheming - runScheming;
+  if (diff >= 15) return 'VERY_PASS';
+  if (diff >= 5)  return 'PASS';
+  if (diff > -5)  return 'BALANCED';
+  if (diff > -15) return 'RUN';
+  return 'VERY_RUN';
+}
+
+export function pickOCPhilosophy(passScheming: number, runScheming: number): string {
+  const lean = ocLeanFromRatings(passScheming, runScheming);
+  return pick(OC_PHILOSOPHIES[lean]);
+}
+
+// ── DC Philosophies ──────────────────────────────────────────
+// Driven by the ratio of run defense (offenseRating) vs pass defense (defenseRating).
+// 5 tiers × 2 variants = 10 unique philosophies.
+
+export type DCLean = 'VERY_RUN_D' | 'RUN_D' | 'BALANCED' | 'PASS_D' | 'VERY_PASS_D';
+
+export const DC_PHILOSOPHIES: Record<DCLean, readonly [string, string]> = {
+  VERY_RUN_D:  ['Run Stuffer', 'Gap Destroyer'],
+  RUN_D:       ['Front Seven Anchor', 'Downhill Stopper'],
+  BALANCED:    ['Adjustment Artist', 'Two-Level Organizer'],
+  PASS_D:      ['Coverage Sculptor', 'Shell Master'],
+  VERY_PASS_D: ['Blitz Designer', 'Chaos Coordinator'],
 };
 
-// Head-coach philosophies are picked from 5 buckets based on the spread between
-// offenseRating and defenseRating. Two name variants per bucket.
+export function dcLeanFromRatings(runDefense: number, passDefense: number): DCLean {
+  const diff = runDefense - passDefense;
+  if (diff >= 15) return 'VERY_RUN_D';
+  if (diff >= 5)  return 'RUN_D';
+  if (diff > -5)  return 'BALANCED';
+  if (diff > -15) return 'PASS_D';
+  return 'VERY_PASS_D';
+}
+
+export function pickDCPhilosophy(runDefense: number, passDefense: number): string {
+  const lean = dcLeanFromRatings(runDefense, passDefense);
+  return pick(DC_PHILOSOPHIES[lean]);
+}
+
+// ── HC Philosophies ──────────────────────────────────────────
+// Driven by the spread between offenseRating and defenseRating.
+// 5 tiers × 2 variants = 10 unique philosophies.
+
 export type HeadCoachLean = 'VERY_OFFENSE' | 'OFFENSE' | 'BALANCED' | 'DEFENSE' | 'VERY_DEFENSE';
 
 export const HEAD_COACH_PHILOSOPHIES: Record<HeadCoachLean, readonly [string, string]> = {
@@ -40,6 +84,8 @@ export function pickHeadCoachPhilosophy(offenseRating: number, defenseRating: nu
   return pick(HEAD_COACH_PHILOSOPHIES[lean]);
 }
 
+// ── Identity helpers ─────────────────────────────────────────
+
 export const OFFENSIVE_IDENTITIES: OffensiveIdentity[] = ['VERTICAL', 'PASS_HEAVY', 'RUN_HEAVY', 'BALANCED'];
 export const DEFENSIVE_IDENTITIES: DefensiveIdentity[] = ['PRESSURE', 'MAN_HEAVY', 'ZONE_HEAVY', 'BALANCED'];
 
@@ -47,12 +93,24 @@ function pick<T>(values: readonly T[]): T {
   return values[Math.floor(Math.random() * values.length)];
 }
 
+// Legacy helpers kept for backward compat with offseason team identity sync.
 export function pickOffensiveCoachPhilosophy(identity: OffensiveIdentity): string {
-  return pick(OFFENSIVE_COACH_PHILOSOPHIES[identity]);
+  // Map identity → lean, then pick
+  const lean: OCLean =
+    identity === 'VERTICAL' ? 'VERY_PASS' :
+    identity === 'PASS_HEAVY' ? 'PASS' :
+    identity === 'RUN_HEAVY' ? 'RUN' :
+    'BALANCED';
+  return pick(OC_PHILOSOPHIES[lean]);
 }
 
 export function pickDefensiveCoachPhilosophy(identity: DefensiveIdentity): string {
-  return pick(DEFENSIVE_COACH_PHILOSOPHIES[identity]);
+  const lean: DCLean =
+    identity === 'PRESSURE' ? 'VERY_PASS_D' :
+    identity === 'MAN_HEAVY' ? 'PASS_D' :
+    identity === 'ZONE_HEAVY' ? 'RUN_D' :
+    'BALANCED';
+  return pick(DC_PHILOSOPHIES[lean]);
 }
 
 export function randomOffensiveIdentity(): OffensiveIdentity {
@@ -75,38 +133,38 @@ export function defensiveIdentityForStyle(style: string): DefensiveIdentity {
   return 'BALANCED';
 }
 
+// ── All OC/DC philosophy names (for reverse lookup) ──────────
+
+const ALL_OC_PHILOSOPHIES = Object.values(OC_PHILOSOPHIES).flat();
+const ALL_DC_PHILOSOPHIES = Object.values(DC_PHILOSOPHIES).flat();
+
 export function offenseStyleForCoachPhilosophy(philosophy: string): 'PASS_HEAVY' | 'RUN_HEAVY' | 'BALANCED' | null {
-  const identity = offensiveIdentityForCoachPhilosophy(philosophy);
-  if (identity === 'VERTICAL' || identity === 'PASS_HEAVY') return 'PASS_HEAVY';
-  if (identity === 'RUN_HEAVY') return 'RUN_HEAVY';
-  if (identity === 'BALANCED') return 'BALANCED';
+  for (const [lean, names] of Object.entries(OC_PHILOSOPHIES) as Array<[OCLean, readonly [string, string]]>) {
+    if (names.includes(philosophy)) {
+      if (lean === 'VERY_PASS' || lean === 'PASS') return 'PASS_HEAVY';
+      if (lean === 'VERY_RUN' || lean === 'RUN') return 'RUN_HEAVY';
+      return 'BALANCED';
+    }
+  }
+  // Legacy fallback
+  if (philosophy.includes('Ground') || philosophy.includes('Smash') || philosophy.includes('Power')) return 'RUN_HEAVY';
+  if (philosophy.includes('Vertical') || philosophy.includes('Air') || philosophy.includes('Route')) return 'PASS_HEAVY';
+  if (philosophy.includes('Balance') || philosophy.includes('Tempo')) return 'BALANCED';
   return null;
 }
 
 export function defenseStyleForCoachPhilosophy(philosophy: string): 'AGGRESSIVE' | 'PREVENT' | 'BALANCED' | null {
-  const identity = defensiveIdentityForCoachPhilosophy(philosophy);
-  if (identity === 'PRESSURE') return 'AGGRESSIVE';
-  if (identity === 'ZONE_HEAVY') return 'PREVENT';
-  if (identity === 'MAN_HEAVY' || identity === 'BALANCED') return 'BALANCED';
-  return null;
-}
-
-function offensiveIdentityForCoachPhilosophy(philosophy: string): OffensiveIdentity | null {
-  for (const identity of OFFENSIVE_IDENTITIES) {
-    if (OFFENSIVE_COACH_PHILOSOPHIES[identity].includes(philosophy)) return identity;
+  for (const [lean, names] of Object.entries(DC_PHILOSOPHIES) as Array<[DCLean, readonly [string, string]]>) {
+    if (names.includes(philosophy)) {
+      if (lean === 'VERY_PASS_D') return 'AGGRESSIVE';
+      if (lean === 'VERY_RUN_D' || lean === 'RUN_D') return 'PREVENT';
+      if (lean === 'PASS_D') return 'BALANCED';
+      return 'BALANCED';
+    }
   }
-  if (philosophy.includes('Ground')) return 'RUN_HEAVY';
-  if (philosophy.includes('Vertical')) return 'VERTICAL';
-  if (philosophy.includes('Balanced')) return 'BALANCED';
-  return null;
-}
-
-function defensiveIdentityForCoachPhilosophy(philosophy: string): DefensiveIdentity | null {
-  for (const identity of DEFENSIVE_IDENTITIES) {
-    if (DEFENSIVE_COACH_PHILOSOPHIES[identity].includes(philosophy)) return identity;
-  }
-  if (philosophy.includes('Pressure')) return 'PRESSURE';
-  if (philosophy.includes('Coverage')) return 'ZONE_HEAVY';
-  if (philosophy.includes('Flexible')) return 'BALANCED';
+  // Legacy fallback
+  if (philosophy.includes('Blitz') || philosophy.includes('Chaos') || philosophy.includes('Pressure')) return 'AGGRESSIVE';
+  if (philosophy.includes('Coverage') || philosophy.includes('Shell') || philosophy.includes('Zone')) return 'PREVENT';
+  if (philosophy.includes('Adjustment') || philosophy.includes('Flexible')) return 'BALANCED';
   return null;
 }

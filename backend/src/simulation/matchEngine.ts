@@ -29,6 +29,7 @@ export interface CoachProfile {
   overall?: number;
   offenseRating?: number;
   defenseRating?: number;
+  developmentRating?: number;
   philosophy?: string;
   reputation?: number;
 }
@@ -140,9 +141,9 @@ type SlotMap = Record<PlayerSlot, PlayerProfile | null>;
 const POSITION_TO_SLOTS: Array<{ position: string; slots: PlayerSlot[] }> = [
   { position: 'QB', slots: ['QB'] },
   { position: 'RB', slots: ['RB'] },
-  { position: 'WR', slots: ['WR1', 'WR2', 'SLOT'] },
+  { position: 'WR', slots: ['WR'] },
   { position: 'TE', slots: ['TE'] },
-  { position: 'OL', slots: ['LT', 'LG', 'C', 'RG', 'RT'] },
+  { position: 'OL', slots: ['T', 'G', 'C'] },
   { position: 'DE', slots: ['EDGE1', 'EDGE2'] },
   { position: 'DT', slots: ['DT1', 'DT2'] },
   { position: 'LB', slots: ['MLB', 'WLB', 'SLB'] },
@@ -210,6 +211,9 @@ function coachOverall(coach?: CoachProfile): number {
   if (!coach) return 60;
   const off = coach.offenseRating ?? coach.overall ?? coach.reputation ?? 60;
   const def = coach.defenseRating ?? coach.overall ?? coach.reputation ?? 60;
+  const dev = coach.developmentRating ?? coach.overall ?? coach.reputation ?? 60;
+  if (coach.role === 'OC') return Math.round((off + dev) / 2);
+  if (coach.role === 'DC') return Math.round((def + dev) / 2);
   return Math.round((off + def) / 2);
 }
 
