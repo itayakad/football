@@ -3,6 +3,7 @@ import { simulateMatch, TeamMatchProfile } from './matchEngine';
 import { computeStandings, TeamRecord } from './standings';
 import { chooseAIGameplan } from './aiCoach';
 import { normalizePlayLoadout } from './playLibrary';
+import { isCoachPosition } from './personnel';
 
 export interface MatchResultRecord {
   week: number;
@@ -38,8 +39,8 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
     const weekMatches = await prisma.match.findMany({
       where: { week, played: false },
       include: {
-        homeTeam: { include: { players: true, coaches: true } },
-        awayTeam: { include: { players: true, coaches: true } },
+        homeTeam: { include: { personnel: true } },
+        awayTeam: { include: { personnel: true } },
       },
     });
 
@@ -60,11 +61,16 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
     };
 
     const weekResults: WeekResult[] = weekMatches.map((match) => {
+      const homeCoaches = match.homeTeam.personnel.filter((p) => isCoachPosition(p.position));
+      const homePlayers = match.homeTeam.personnel.filter((p) => !isCoachPosition(p.position));
+      const awayCoaches = match.awayTeam.personnel.filter((p) => isCoachPosition(p.position));
+      const awayPlayers = match.awayTeam.personnel.filter((p) => !isCoachPosition(p.position));
+
       const home: TeamMatchProfile = {
         id:       match.homeTeamId,
         name:     match.homeTeam.name,
-        coaches:  match.homeTeam.coaches,
-        players:  match.homeTeam.players,
+        coaches:  homeCoaches,
+        players:  homePlayers,
         offensivePlays: normalizePlayLoadout('offense', match.homeTeam.offensivePlays),
         defensivePlays: normalizePlayLoadout('defense', match.homeTeam.defensivePlays),
       };
@@ -72,8 +78,8 @@ export async function simulateSeason(): Promise<LeagueResult[]> {
       const away: TeamMatchProfile = {
         id:       match.awayTeamId,
         name:     match.awayTeam.name,
-        coaches:  match.awayTeam.coaches,
-        players:  match.awayTeam.players,
+        coaches:  awayCoaches,
+        players:  awayPlayers,
         offensivePlays: normalizePlayLoadout('offense', match.awayTeam.offensivePlays),
         defensivePlays: normalizePlayLoadout('defense', match.awayTeam.defensivePlays),
       };

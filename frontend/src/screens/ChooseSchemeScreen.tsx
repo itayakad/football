@@ -400,7 +400,7 @@ function PlaySketch({ play }: { play: PlayTemplate }) {
 function buildSlotMap(players: RosterPlayer[]): Record<string, RosterPlayer | undefined> {
   const byPosition = (position: string) => players
     .filter((player) => player.position === position)
-    .sort((a, b) => (a.depthOrder ?? 999) - (b.depthOrder ?? 999) || b.overall - a.overall);
+    .sort((a, b) => b.overall - a.overall);
   const qb = byPosition('QB');
   const rb = byPosition('RB');
   const wr = byPosition('WR');

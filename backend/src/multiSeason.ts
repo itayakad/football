@@ -35,7 +35,7 @@ interface SeasonAgg {
 
 async function clearDatabase() {
   await prisma.match.deleteMany();
-  await prisma.player.deleteMany();
+  await prisma.personnel.deleteMany();
   await prisma.team.deleteMany();
   await prisma.league.deleteMany();
 }

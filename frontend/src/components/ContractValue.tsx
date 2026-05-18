@@ -7,6 +7,7 @@ interface ContractValueProps {
   amount: number;
   years?: number;
   compact?: boolean;
+  perYear?: boolean;
 }
 
 export function formatMoney(value: number): string {
@@ -15,11 +16,12 @@ export function formatMoney(value: number): string {
   return `$${Math.round(value / 1_000)}K`;
 }
 
-export const ContractValue: React.FC<ContractValueProps> = ({ amount, years, compact }) => (
+export const ContractValue: React.FC<ContractValueProps> = ({ amount, years, compact, perYear }) => (
   <View style={[styles.container, compact && styles.compact]}>
     <Text style={compact ? styles.compactText : styles.text} numberOfLines={1}>
       {formatMoney(amount)}
-      {years !== undefined ? ` / ${years}y` : ''}
+      {perYear ? '/y' : ''}
+      {years !== undefined ? (perYear ? ` · ${years}y left` : ` / ${years}y`) : ''}
     </Text>
   </View>
 );

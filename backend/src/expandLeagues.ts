@@ -3,34 +3,24 @@ import { prisma } from './db';
 import {
   TEAMS_BY_TIER,
   POSITION_DISTRIBUTION,
-  buildCoachStaff,
+  buildPersonnelStaff,
   philosophyForStyle,
   randomInt,
   randomName,
   generateOverall,
-  generatePotential,
-  generateSalary,
-  splitOverallIntoStats,
+  splitIntoStats,
+  personnelSalary,
 } from './seed';
 import { generateRoundRobin } from './simulation/scheduleGenerator';
 
-// Idempotent migration: bring every league up to 10 teams without wiping
-// players, coaches, transfers, or season history. The current season's match
-// rows are dropped and regenerated for the new team count, so any in-progress
-// regular-season standings reset.
+// Idempotent migration: bring every league up to its full team count without
+// wiping rosters or season history. The current season's match rows are dropped
+// and regenerated for the new team count, so any in-progress regular-season
+// standings reset.
 async function expandLeagues(): Promise<void> {
   // Special teams (K/P) were removed from the roster model. Clean any existing
-  // K/P players + their listings so the DB matches the new POSITION_DISTRIBUTION.
-  const specialPlayerIds = (await prisma.player.findMany({
-    where: { position: { in: ['K', 'P'] } },
-    select: { id: true },
-  })).map((p) => p.id);
-  if (specialPlayerIds.length > 0) {
-    await prisma.transferOffer.deleteMany({ where: { listing: { playerId: { in: specialPlayerIds } } } });
-    await prisma.transferListing.deleteMany({ where: { playerId: { in: specialPlayerIds } } });
-    await prisma.player.deleteMany({ where: { id: { in: specialPlayerIds } } });
-    console.log(`  • removed ${specialPlayerIds.length} K/P players`);
-  }
+  // K/P personnel so the DB matches the new POSITION_DISTRIBUTION.
+  await prisma.personnel.deleteMany({ where: { position: { in: ['K', 'P'] } } });
 
   const leagues = await prisma.league.findMany({
     include: { teams: true },
@@ -63,47 +53,39 @@ async function expandLeagues(): Promise<void> {
         },
       });
 
-      await prisma.coach.createMany({
-        data: buildCoachStaff(team.id, team.offenseStyle, team.defenseStyle),
-      });
-
-      const players: Array<{
+      const personnel: Array<{
         name: string; position: string; overall: number;
-        statHigh: number; statLow: number;
-        potential: number;
+        stat1: number; stat2: number;
         age: number; teamId: string;
-        salary: number; contractYearsLeft: number; extensionEligible: boolean;
+        salary: number; contractYearsLeft: number; yearsWithTeam: number;
       }> = [];
+
+      personnel.push(...buildPersonnelStaff(team.id, team.offenseStyle, team.defenseStyle));
+
       for (const { position, count } of POSITION_DISTRIBUTION) {
         for (let i = 0; i < count; i++) {
           const age = randomInt(21, 35);
           const overall = generateOverall(age, league.tier);
-          const { statHigh, statLow } = splitOverallIntoStats(overall);
-          players.push({
+          const { stat1, stat2 } = splitIntoStats(overall);
+          personnel.push({
             name:              randomName(),
             position,
-            overall:           Math.round((statHigh + statLow) / 2),
-            statHigh,
-            statLow,
-            potential:         generatePotential(age, overall),
+            overall:           Math.round((stat1 + stat2) / 2),
+            stat1,
+            stat2,
             age,
             teamId:            team.id,
-            salary:            generateSalary(overall, age),
+            salary:            personnelSalary(position, overall, age),
             contractYearsLeft: randomInt(1, 4),
-            extensionEligible: age >= 27 || overall >= 82,
+            yearsWithTeam:     1,
           });
         }
       }
-      await prisma.player.createMany({ data: players });
+      await prisma.personnel.createMany({ data: personnel });
     }
   }
 
-  // Rebuild fixtures for every league with the new team counts. Wipes the
-  // current season's matches; finished playoff matches from a prior season
-  // are already cleared via the offseason flow, so this only nukes regular-
-  // season state. League histories / TeamSeasonHistory rows are untouched.
   console.log(`  • rebuilding schedules`);
-  await prisma.transferOffer.deleteMany({ where: { listing: { status: { not: 'ACTIVE' } } } });
   await prisma.match.deleteMany();
 
   const leaguesAfter = await prisma.league.findMany({

@@ -5,6 +5,7 @@ import { chooseAIGameplan } from '../simulation/aiCoach';
 import { normalizePlayLoadout } from '../simulation/playLibrary';
 import { generateMatchFeed, FeedEvent } from './feedGenerator';
 import { advanceOffseason, OffseasonResult } from '../simulation/offseason';
+import { isCoachPosition } from '../simulation/personnel';
 
 export interface SingleMatchResult {
   matchId:        string;
@@ -25,10 +26,9 @@ const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
   QB: 1, RB: 2, WR: 2, TE: 1, OL: 5, DE: 2, DT: 2, LB: 3, CB: 3, S: 2,
 };
 
-function activeDepthPlayers<T extends { id: string; position: string; overall: number; depthOrder?: number | null }>(players: T[]): T[] {
+function startersByOverall<T extends { id: string; position: string; overall: number }>(players: T[]): T[] {
   const sorted = [...players].sort((a, b) =>
     a.position.localeCompare(b.position) ||
-    (a.depthOrder ?? 999) - (b.depthOrder ?? 999) ||
     b.overall - a.overall
   );
   const counts: Record<string, number> = {};
@@ -41,6 +41,27 @@ function activeDepthPlayers<T extends { id: string; position: string; overall: n
   });
 }
 
+type TeamWithPersonnel = {
+  id: string;
+  name: string;
+  offensivePlays: unknown;
+  defensivePlays: unknown;
+  personnel: Array<{ id: string; name: string; position: string; overall: number; stat1: number; stat2: number }>;
+};
+
+function buildMatchProfile(team: TeamWithPersonnel): TeamMatchProfile {
+  const coaches = team.personnel.filter((p) => isCoachPosition(p.position));
+  const players = team.personnel.filter((p) => !isCoachPosition(p.position));
+  return {
+    id:       team.id,
+    name:     team.name,
+    coaches,
+    players:  startersByOverall(players),
+    offensivePlays: normalizePlayLoadout('offense', team.offensivePlays),
+    defensivePlays: normalizePlayLoadout('defense', team.defensivePlays),
+  };
+}
+
 export async function simulateSingleMatch(
   matchId:      string,
   userTeamId?:  string,
@@ -49,31 +70,16 @@ export async function simulateSingleMatch(
   const match = await prisma.match.findUnique({
     where: { id: matchId },
     include: {
-      homeTeam: { include: { players: true, coaches: true } },
-      awayTeam: { include: { players: true, coaches: true } },
+      homeTeam: { include: { personnel: true } },
+      awayTeam: { include: { personnel: true } },
     },
   });
 
   if (!match)        throw new Error('Match not found');
   if (match.played)  throw new Error('Match already played');
 
-  const home: TeamMatchProfile = {
-    id:       match.homeTeamId,
-    name:     match.homeTeam.name,
-    coaches:  match.homeTeam.coaches,
-    players:  activeDepthPlayers(match.homeTeam.players),
-    offensivePlays: normalizePlayLoadout('offense', match.homeTeam.offensivePlays),
-    defensivePlays: normalizePlayLoadout('defense', match.homeTeam.defensivePlays),
-  };
-
-  const away: TeamMatchProfile = {
-    id:       match.awayTeamId,
-    name:     match.awayTeam.name,
-    coaches:  match.awayTeam.coaches,
-    players:  activeDepthPlayers(match.awayTeam.players),
-    offensivePlays: normalizePlayLoadout('offense', match.awayTeam.offensivePlays),
-    defensivePlays: normalizePlayLoadout('defense', match.awayTeam.defensivePlays),
-  };
+  const home = buildMatchProfile(match.homeTeam);
+  const away = buildMatchProfile(match.awayTeam);
 
   const isUserHome = userTeamId === match.homeTeamId;
   const isUserAway = userTeamId === match.awayTeamId;
@@ -98,20 +104,18 @@ export async function simulateSingleMatch(
     },
   });
 
+  const homePlayers = match.homeTeam.personnel.filter((p) => !isCoachPosition(p.position));
+  const awayPlayers = match.awayTeam.personnel.filter((p) => !isCoachPosition(p.position));
   const events = generateMatchFeed(
-    { name: match.homeTeam.name, side: 'home', topPlayers: pickTopPlayers(match.homeTeam.players) },
-    { name: match.awayTeam.name, side: 'away', topPlayers: pickTopPlayers(match.awayTeam.players) },
+    { name: match.homeTeam.name, side: 'home', topPlayers: pickTopPlayers(homePlayers) },
+    { name: match.awayTeam.name, side: 'away', topPlayers: pickTopPlayers(awayPlayers) },
     result,
   );
 
-  // Fire-and-forget: simulate other week games in the background so the
-  // response returns to the frontend immediately.
   simulateRestOfWeek(match.week, matchId).catch((err) =>
     console.error('[simulateRestOfWeek] background error:', err),
   );
 
-  // Season-advance check: run after a short yield so background work can
-  // settle, but still within the same request for simplicity.
   const remaining = await prisma.match.count({ where: { played: false } });
   const seasonAdvance = remaining === 0 ? await advanceOffseason() : null;
 
@@ -135,29 +139,14 @@ async function simulateRestOfWeek(week: number, excludeMatchId: string): Promise
   const others = await prisma.match.findMany({
     where: { week, played: false, id: { not: excludeMatchId } },
     include: {
-      homeTeam: { include: { players: true, coaches: true } },
-      awayTeam: { include: { players: true, coaches: true } },
+      homeTeam: { include: { personnel: true } },
+      awayTeam: { include: { personnel: true } },
     },
   });
 
-  // Simulate all remaining games in parallel — no need to block on each other.
   await Promise.all(others.map(async (m) => {
-    const home: TeamMatchProfile = {
-      id:       m.homeTeamId,
-      name:     m.homeTeam.name,
-      coaches:  m.homeTeam.coaches,
-      players:  activeDepthPlayers(m.homeTeam.players),
-      offensivePlays: normalizePlayLoadout('offense', m.homeTeam.offensivePlays),
-      defensivePlays: normalizePlayLoadout('defense', m.homeTeam.defensivePlays),
-    };
-    const away: TeamMatchProfile = {
-      id:       m.awayTeamId,
-      name:     m.awayTeam.name,
-      coaches:  m.awayTeam.coaches,
-      players:  activeDepthPlayers(m.awayTeam.players),
-      offensivePlays: normalizePlayLoadout('offense', m.awayTeam.offensivePlays),
-      defensivePlays: normalizePlayLoadout('defense', m.awayTeam.defensivePlays),
-    };
+    const home = buildMatchProfile(m.homeTeam);
+    const away = buildMatchProfile(m.awayTeam);
     const homeGameplan = chooseAIGameplan(home);
     const awayGameplan = chooseAIGameplan(away);
     const r = simulateMatch(home, away, m.week, homeGameplan, awayGameplan);

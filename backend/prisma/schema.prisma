@@ -51,11 +51,8 @@ model Team {
   offensivePlays Json?
   defensivePlays Json?
   money         Int          @default(150000000)
-  players       Player[]
-  coaches       Coach[]
+  personnel     Personnel[]
   schemes       TeamScheme[]
-  listings      TransferListing[]
-  transferOffers TransferOffer[]
   teamSeasonHistories TeamSeasonHistory[]
   homeMatches   Match[]      @relation("HomeTeam")
   awayMatches   Match[]      @relation("AwayTeam")
@@ -76,77 +73,26 @@ model TeamScheme {
   @@unique([teamId, unit, name])
 }
 
-model Coach {
-  id                    String   @id @default(cuid())
-  name                  String
-  role                  String
-  philosophy            String
-  developmentSpecialty  String
-  aggression            Int
-  reputation            Int
-  // Coach OVRs used by the play-driven engine.
-  //   - HEAD_COACH: overall (general); offenseRating + defenseRating drive
-  //     the offensive/defensive playcalling RNG buckets respectively.
-  //   - OC / DC: overall is a play-strength multiplier in the engine.
-  overall               Int      @default(60)
-  offenseRating         Int      @default(60)
-  defenseRating         Int      @default(60)
-  developmentRating     Int      @default(60)
-  careerWins            Int      @default(0)
-  careerLosses          Int      @default(0)
-  titles                Int      @default(0)
-  salary                Int      @default(1500000)
-  contractYearsLeft     Int      @default(3)
-  contractTotalYears    Int      @default(3)
-  contractTotalCost     Int      @default(4500000)
-  hotSeat               Int      @default(20)
-  yearsWithTeam         Int      @default(1)
-  age                   Int      @default(48)
-  teamId                String?
-  team                  Team?    @relation(fields: [teamId], references: [id])
-}
+// Unified roster model covering coaches (HC/OC/DC) and players (QB/RB/WR/...).
+// Stat labels and archetype/philosophy names are derived from `position` at read time.
+model Personnel {
+  id                String   @id @default(cuid())
+  name              String
+  position          String           // 'HC' | 'OC' | 'DC' | 'QB' | 'RB' | 'WR' | 'TE' | 'OL' | 'DE' | 'DT' | 'LB' | 'CB' | 'S'
+  overall           Int      @default(60)
+  stat1             Int      @default(60)
+  stat2             Int      @default(60)
+  careerWins        Int      @default(0)
+  careerLosses      Int      @default(0)
+  titles            Int      @default(0)
+  salary            Int      @default(2700000)
+  contractYearsLeft Int      @default(4)
+  age               Int      @default(25)
+  yearsWithTeam     Int      @default(1)
+  teamId            String?
+  team              Team?    @relation(fields: [teamId], references: [id])
 
-model Player {
-  id                 String  @id @default(cuid())
-  name               String
-  position           String
-  // Each player has two stored stats; overall = round((statHigh + statLow) / 2).
-  // overall stays denormalized so callers (sim, sorting) keep working.
-  statHigh           Int     @default(60)
-  statLow            Int     @default(60)
-  overall            Int
-  potential          Int
-  age                Int
-  depthOrder         Int     @default(0)
-  salary             Int     @default(2500000)
-  contractYearsLeft  Int     @default(2)
-  extensionEligible  Boolean @default(false)
-  teamId             String?
-  team               Team?   @relation(fields: [teamId], references: [id])
-  transferListing    TransferListing?
-}
-
-model TransferListing {
-  id           String   @id @default(cuid())
-  playerId     String   @unique
-  player       Player   @relation(fields: [playerId], references: [id])
-  sellerTeamId String
-  sellerTeam   Team     @relation(fields: [sellerTeamId], references: [id])
-  askingPrice  Int
-  status       String   @default("ACTIVE")
-  createdAt    DateTime @default(now())
-  offers       TransferOffer[]
-}
-
-model TransferOffer {
-  id             String          @id @default(cuid())
-  listingId      String
-  listing        TransferListing @relation(fields: [listingId], references: [id])
-  buyerTeamId    String
-  buyerTeam      Team            @relation(fields: [buyerTeamId], references: [id])
-  amount         Int
-  status         String          @default("PENDING")
-  createdAt      DateTime        @default(now())
+  @@index([teamId, position])
 }
 
 model SeasonHistory {
@@ -201,20 +147,6 @@ model TeamSeasonHistory {
   createdAt        DateTime      @default(now())
 
   @@unique([season, teamId])
-}
-
-model TradeHistory {
-  id           String   @id @default(cuid())
-  season       Int
-  playerId     String
-  playerName   String
-  fromTeamId   String
-  fromTeamName String
-  toTeamId     String
-  toTeamName   String
-  fee          Int
-  story        String
-  createdAt    DateTime @default(now())
 }
 
 model RetirementHistory {

@@ -2,12 +2,6 @@ import 'dotenv/config';
 import { prisma } from './db';
 import { generateRoundRobin } from './simulation/scheduleGenerator';
 import { DEFENSIVE_PLAYS, OFFENSIVE_PLAYS, PlayCategory } from './simulation/playLibrary';
-import {
-  pickDCPhilosophy,
-  pickHeadCoachPhilosophy,
-  pickOCPhilosophy,
-} from './simulation/coachPhilosophy';
-import { deriveTeamIdentity, TeamIdentity } from './simulation/teamIdentity';
 
 // ─── Name Data ────────────────────────────────────────────
 
@@ -32,7 +26,6 @@ const LAST_NAMES = [
 
 const COACH_FIRST_NAMES = ['Frank', 'Marty', 'Calvin', 'Shane', 'Victor', 'Eli', 'Grant', 'Wes', 'Nolan', 'Ray', 'DeMarcus', 'Cole'];
 const COACH_LAST_NAMES = ['Hayes', 'Bennett', 'Porter', 'Hughes', 'Walsh', 'Foster', 'Carver', 'Brooks', 'Madden', 'Sullivan', 'Pierce', 'Graves'];
-const DEVELOPMENT_SPECIALTIES = ['QB', 'Skill', 'OL', 'DL', 'LB', 'Secondary'];
 
 // ─── League Config ────────────────────────────────────────
 
@@ -42,9 +35,6 @@ const LEAGUES = [
   { name: 'Second Division',  tier: 3 },
 ];
 
-// Each team has a distinct philosophical identity — not just ratings.
-// This is what makes games feel different from each other.
-//
 const TEAMS_BY_TIER: Record<number, Array<{
   name: string;
   offense: number;
@@ -53,28 +43,28 @@ const TEAMS_BY_TIER: Record<number, Array<{
   defenseStyle: string;
 }>> = {
   1: [
-    { name: 'New York Titans',    offense: 88, defense: 82, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' }, // Complete team
-    { name: 'Los Angeles Wolves', offense: 83, defense: 79, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   }, // Hollywood air raid
-    { name: 'Chicago Storm',      offense: 78, defense: 85, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' }, // Smashmouth identity
-    { name: 'Dallas Vanguard',    offense: 85, defense: 75, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' }, // Gunslinger
-    { name: 'Miami Thunder',      offense: 76, defense: 78, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    }, // Spread + bend-don't-break
-    { name: 'Seattle Falcons',    offense: 80, defense: 83, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    }, // Conservative, wins ugly
-    { name: 'Boston Monarchs',    offense: 74, defense: 80, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   }, // Clock-eating grinders
-    { name: 'Denver Pioneers',    offense: 79, defense: 76, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' }, // Solid two-way team
-    { name: 'Philadelphia Liberty', offense: 81, defense: 79, offenseStyle: 'BALANCED',   defenseStyle: 'BALANCED'   }, // Well-rounded contender
-    { name: 'Pittsburgh Iron',     offense: 74, defense: 86, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' }, // Old-school heavy
+    { name: 'New York Titans',    offense: 88, defense: 82, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' },
+    { name: 'Los Angeles Wolves', offense: 83, defense: 79, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   },
+    { name: 'Chicago Storm',      offense: 78, defense: 85, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
+    { name: 'Dallas Vanguard',    offense: 85, defense: 75, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' },
+    { name: 'Miami Thunder',      offense: 76, defense: 78, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    },
+    { name: 'Seattle Falcons',    offense: 80, defense: 83, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    },
+    { name: 'Boston Monarchs',    offense: 74, defense: 80, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   },
+    { name: 'Denver Pioneers',    offense: 79, defense: 76, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' },
+    { name: 'Philadelphia Liberty', offense: 81, defense: 79, offenseStyle: 'BALANCED', defenseStyle: 'BALANCED'   },
+    { name: 'Pittsburgh Iron',     offense: 74, defense: 86, offenseStyle: 'RUN_HEAVY', defenseStyle: 'AGGRESSIVE' },
   ],
   2: [
-    { name: 'Atlanta Blaze',      offense: 73, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' }, // High-risk, high-reward
-    { name: 'Houston Force',      offense: 68, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' }, // Power football
-    { name: 'Phoenix Fury',       offense: 70, defense: 65, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   }, // Desert air attack
-    { name: 'Portland Surge',     offense: 65, defense: 71, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    }, // Defensive grinders
-    { name: 'Nashville Vipers',   offense: 67, defense: 69, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   }, // Old-school ground game
-    { name: 'Kansas Stallions',   offense: 72, defense: 67, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' }, // Press defense identity
-    { name: 'Tampa Barracudas',   offense: 64, defense: 71, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    }, // Air raid + prevent
-    { name: 'San Diego Aviators', offense: 71, defense: 66, offenseStyle: 'BALANCED',   defenseStyle: 'BALANCED'   }, // Well-rounded
-    { name: 'Detroit Motors',     offense: 70, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' }, // Modern, gritty
-    { name: 'Cleveland Anchors',  offense: 65, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'PREVENT'    }, // Defense-first grinders
+    { name: 'Atlanta Blaze',      offense: 73, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' },
+    { name: 'Houston Force',      offense: 68, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
+    { name: 'Phoenix Fury',       offense: 70, defense: 65, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   },
+    { name: 'Portland Surge',     offense: 65, defense: 71, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    },
+    { name: 'Nashville Vipers',   offense: 67, defense: 69, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   },
+    { name: 'Kansas Stallions',   offense: 72, defense: 67, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' },
+    { name: 'Tampa Barracudas',   offense: 64, defense: 71, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    },
+    { name: 'San Diego Aviators', offense: 71, defense: 66, offenseStyle: 'BALANCED',   defenseStyle: 'BALANCED'   },
+    { name: 'Detroit Motors',     offense: 70, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' },
+    { name: 'Cleveland Anchors',  offense: 65, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'PREVENT'    },
   ],
   3: [
     { name: 'Columbus Crushers',    offense: 62, defense: 57, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
@@ -90,23 +80,11 @@ const TEAMS_BY_TIER: Record<number, Array<{
   ],
 };
 
-// Formation minimums plus at least one backup at every position.
-// This is the current roster safety rule until cutting/offseason roster management
-// gets a fuller contract.
 const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
-  QB: 1,
-  RB: 2,
-  WR: 2,
-  TE: 1,
-  OL: 5,
-  DE: 2,
-  DT: 2,
-  LB: 3,
-  CB: 3,
-  S:  2,
+  QB: 1, RB: 2, WR: 2, TE: 1, OL: 5, DE: 2, DT: 2, LB: 3, CB: 3, S: 2,
 };
 
-// 39 players per team. Mirrors a compressed 53-man NFL roster (no special teams).
+// 39 players per team.
 const POSITION_DISTRIBUTION = [
   { position: 'QB',  count: 2 },
   { position: 'RB',  count: 4 },
@@ -143,50 +121,47 @@ export function randomName(): string {
   return `${randomElement(FIRST_NAMES)} ${randomElement(LAST_NAMES)}`;
 }
 
-function randomCoachName(): string {
+export function randomCoachName(): string {
   return `${randomElement(COACH_FIRST_NAMES)} ${randomElement(COACH_LAST_NAMES)}`;
 }
 
-function coachSalary(role: string, reputation: number, titles = 0): number {
-  const rolePremium = role === 'HEAD_COACH' ? 1.8 : 1.0;
-  return Math.round((1_500_000 + reputation * reputation * 2_200 * rolePremium + titles * 850_000) / 100_000) * 100_000;
+export function clampRating(value: number): number {
+  return Math.max(35, Math.min(99, value));
 }
 
-// Age curve: young players are rawer, veterans are settled.
-// Split an overall into two stored stats (high/low) such that their average
-// reconstructs the overall. Variance is randomized so two 70-OVR players don't
-// look identical on the card.
-export function splitOverallIntoStats(overall: number): { statHigh: number; statLow: number } {
-  const delta = randomInt(0, 6);
-  const statHigh = Math.max(35, Math.min(99, overall + delta));
-  const statLow  = Math.max(35, Math.min(99, overall - delta));
-  return { statHigh, statLow };
+// Salary derivation (used only when generating new candidates; stored salary
+// stays authoritative once written).
+export function personnelSalary(position: string, overall: number, age = 27, titles = 0): number {
+  if (position === 'HC') {
+    return Math.round((1_500_000 + overall * overall * 2_200 * 1.8 + titles * 850_000) / 100_000) * 100_000;
+  }
+  if (position === 'OC' || position === 'DC') {
+    return Math.round((1_500_000 + overall * overall * 2_200 + titles * 850_000) / 100_000) * 100_000;
+  }
+  // Player
+  const agePremium = age >= 27 && age <= 31 ? 250_000 : age >= 32 ? -150_000 : 0;
+  return Math.max(700_000, Math.round((350_000 + overall * overall * 420 + agePremium) / 100_000) * 100_000);
+}
+
+// Splits an overall into two stored stats. Diff sign is randomized so the
+// archetype derivation can land on either stat1-dominant or stat2-dominant tiers.
+export function splitIntoStats(overall: number): { stat1: number; stat2: number } {
+  const delta = randomInt(0, 8);
+  const flip = Math.random() < 0.5 ? 1 : -1;
+  const stat1 = clampRating(overall + delta * flip);
+  const stat2 = clampRating(overall - delta * flip);
+  return { stat1, stat2 };
 }
 
 export function generateOverall(age: number, tier: number): number {
   const [min, max]: [number, number] = tier === 1 ? [74, 92] : tier === 2 ? [62, 80] : [50, 68];
   const base = randomInt(min, max);
   const agePenalty =
-    age <= 23 ? randomInt(8, 15) :   // still raw
-    age <= 26 ? randomInt(3, 7)  :   // approaching prime
-    age <= 30 ? 0                :   // prime
-                randomInt(3, 10);    // declining
+    age <= 23 ? randomInt(8, 15) :
+    age <= 26 ? randomInt(3, 7)  :
+    age <= 30 ? 0                :
+                randomInt(3, 10);
   return Math.max(30, Math.min(99, base - agePenalty));
-}
-
-// Young players have upside; veterans are what they are.
-export function generatePotential(age: number, overall: number): number {
-  const upside =
-    age <= 23 ? randomInt(15, 28) :
-    age <= 27 ? randomInt(5, 14)  :
-    age <= 30 ? randomInt(2, 8)   :
-                0;
-  return Math.max(overall, Math.min(99, overall + upside));
-}
-
-export function generateSalary(overall: number, age: number): number {
-  const agePremium = age >= 27 && age <= 31 ? 250_000 : age >= 32 ? -150_000 : 0;
-  return Math.max(700_000, Math.round((350_000 + overall * overall * 420 + agePremium) / 100_000) * 100_000);
 }
 
 // ─── Seed ─────────────────────────────────────────────────
@@ -197,7 +172,7 @@ export async function seedWorld(): Promise<void> {
   );
   console.log(`  ✓ ${leagues.length} leagues`);
 
-  const allTeamMeta: Array<{ id: string; leagueId: string; tier: number }> = [];
+  const allTeamMeta: Array<{ id: string; leagueId: string; tier: number; offenseStyle: string; defenseStyle: string }> = [];
 
   for (const league of leagues) {
     const configs = TEAMS_BY_TIER[league.tier];
@@ -219,48 +194,55 @@ export async function seedWorld(): Promise<void> {
         })
       )
     );
-    teams.forEach((t) => allTeamMeta.push({ id: t.id, leagueId: league.id, tier: league.tier }));
+    teams.forEach((t, idx) => allTeamMeta.push({
+      id: t.id,
+      leagueId: league.id,
+      tier: league.tier,
+      offenseStyle: configs[idx].offenseStyle,
+      defenseStyle: configs[idx].defenseStyle,
+    }));
   }
   console.log(`  ✓ ${allTeamMeta.length} teams`);
 
-  const teamsForCoaches = await prisma.team.findMany();
-  await prisma.coach.createMany({
-    data: teamsForCoaches.flatMap((team) => buildCoachStaff(team.id, team.offenseStyle, team.defenseStyle, deriveTeamIdentity(team))),
-  });
-  console.log(`  ✓ ${teamsForCoaches.length * 3} staff`);
-
-  const playerData: Array<{
-    name: string; position: string; overall: number;
-    statHigh: number; statLow: number;
-    potential: number; age: number; teamId: string;
-    salary: number; contractYearsLeft: number; extensionEligible: boolean;
+  // Coaches (HC, OC, DC) + players (QB..S) all go into the same Personnel table.
+  const personnelData: Array<{
+    name: string;
+    position: string;
+    overall: number;
+    stat1: number;
+    stat2: number;
+    age: number;
+    salary: number;
+    contractYearsLeft: number;
+    yearsWithTeam: number;
+    teamId: string;
   }> = [];
 
   for (const team of allTeamMeta) {
+    personnelData.push(...buildPersonnelStaff(team.id, team.offenseStyle, team.defenseStyle));
     for (const { position, count } of POSITION_DISTRIBUTION) {
       for (let i = 0; i < count; i++) {
         const age     = randomInt(21, 35);
         const overall = generateOverall(age, team.tier);
-        const { statHigh, statLow } = splitOverallIntoStats(overall);
-        playerData.push({
-          name:      randomName(),
+        const { stat1, stat2 } = splitIntoStats(overall);
+        personnelData.push({
+          name:    randomName(),
           position,
-          overall:   Math.round((statHigh + statLow) / 2),
-          statHigh,
-          statLow,
-          potential: generatePotential(age, overall),
+          overall: Math.round((stat1 + stat2) / 2),
+          stat1,
+          stat2,
           age,
-          teamId:    team.id,
-          salary:    generateSalary(overall, age),
+          salary:  personnelSalary(position, overall, age),
           contractYearsLeft: randomInt(1, 4),
-          extensionEligible: age >= 27 || overall >= 82,
+          yearsWithTeam: 1,
+          teamId: team.id,
         });
       }
     }
   }
 
-  await prisma.player.createMany({ data: playerData });
-  console.log(`  ✓ ${playerData.length} players`);
+  await prisma.personnel.createMany({ data: personnelData });
+  console.log(`  ✓ ${personnelData.length} personnel (coaches + players)`);
 
   let totalMatches = 0;
   for (const league of leagues) {
@@ -283,10 +265,6 @@ export async function seedWorld(): Promise<void> {
   }
 
   console.log(`  ✓ ${totalMatches} matches scheduled`);
-}
-
-function clampRating(value: number): number {
-  return Math.max(35, Math.min(99, value));
 }
 
 function loadoutByWeights<T extends { id: string; category: PlayCategory }>(
@@ -324,93 +302,69 @@ function defensiveLoadoutForStyle(defenseStyle: string): string[] {
   return loadoutByWeights(DEFENSIVE_PLAYS, [['ZONE', 3], ['BLITZ', 2], ['ZONE_BLITZ', 2], ['MAN', 2]]);
 }
 
-export function buildCoachStaff(teamId: string, offenseStyle: string, defenseStyle: string, identity?: TeamIdentity) {
-  const offensiveSpecialty = offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : randomElement(['QB', 'Skill', 'OL']);
-  const defensiveSpecialty = defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? randomElement(['DL', 'LB']) : randomElement(['LB', 'Secondary']);
+// HC + OC + DC for a team. Coordinator stat1/stat2 semantics:
+//   OC: stat1 = pass scheming, stat2 = run scheming
+//   DC: stat1 = run defense,  stat2 = pass defense
+export function buildPersonnelStaff(teamId: string, offenseStyle: string, defenseStyle: string) {
   const hcOvr = randomInt(50, 82);
   const ocOvr = randomInt(45, 78);
   const dcOvr = randomInt(45, 78);
+
+  // HC
+  const hcOffense = clampRating(hcOvr + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? randomInt(2, 8) : randomInt(-2, 5)));
+  const hcDefense = clampRating(hcOvr + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? randomInt(2, 8) : randomInt(-2, 5)));
+  const hcOverall = Math.round((hcOffense + hcDefense) / 2);
+  const hcAge = randomInt(39, 64);
+
+  // OC
+  const ocStat1 = clampRating(ocOvr + randomInt(-8, 12));
+  const ocStat2 = clampRating(ocOvr + randomInt(-8, 12));
+  const ocOverall = Math.round((ocStat1 + ocStat2) / 2);
+  const ocAge = randomInt(34, 58);
+
+  // DC
+  const dcStat1 = clampRating(dcOvr + randomInt(-8, 12));
+  const dcStat2 = clampRating(dcOvr + randomInt(-8, 12));
+  const dcOverall = Math.round((dcStat1 + dcStat2) / 2);
+  const dcAge = randomInt(34, 60);
+
   return [
-    (() => {
-      const hcOffense = clampRating(hcOvr + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? randomInt(2, 8) : randomInt(-2, 5)));
-      const hcDefense = clampRating(hcOvr + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? randomInt(2, 8) : randomInt(-2, 5)));
-      const developmentRating = Math.round((hcOffense + hcDefense) / 2);
-      const role = 'HEAD_COACH';
-      const reputation = randomInt(45, 78);
-      return {
-        name: randomCoachName(),
-        role,
-        philosophy: pickHeadCoachPhilosophy(hcOffense, hcDefense),
-        developmentSpecialty: randomElement(DEVELOPMENT_SPECIALTIES),
-        aggression: defenseStyle === 'AGGRESSIVE' ? randomInt(70, 92) : randomInt(35, 70),
-        reputation,
-        overall: Math.round((hcOffense + hcDefense) / 2),
-        offenseRating: hcOffense,
-        defenseRating: hcDefense,
-        developmentRating,
-        salary: coachSalary(role, reputation),
-        contractYearsLeft: 4,
-        contractTotalYears: 4,
-        contractTotalCost: coachSalary(role, reputation) * 4,
-        hotSeat: randomInt(12, 35),
-        age: randomInt(39, 64),
-        teamId,
-      };
-    })(),
-    (() => {
-      // OC: offenseRating = pass scheming, defenseRating = run scheming
-      const passScheming = clampRating(ocOvr + randomInt(-8, 12));
-      const runScheming  = clampRating(ocOvr + randomInt(-8, 12));
-      const developmentRating = clampRating(Math.round((passScheming + runScheming) / 2) + randomInt(-4, 4));
-      const role = 'OC';
-      const reputation = randomInt(38, 72);
-      return {
-        name: randomCoachName(),
-        role,
-        philosophy: pickOCPhilosophy(passScheming, runScheming),
-        developmentSpecialty: offensiveSpecialty,
-        aggression: offenseStyle === 'PASS_HEAVY' ? randomInt(65, 92) : randomInt(30, 68),
-        reputation,
-        overall: Math.round((passScheming + runScheming + developmentRating) / 3),
-        offenseRating: passScheming,
-        defenseRating: runScheming,
-        developmentRating,
-        salary: coachSalary(role, reputation),
-        contractYearsLeft: 3,
-        contractTotalYears: 3,
-        contractTotalCost: coachSalary(role, reputation) * 3,
-        hotSeat: randomInt(8, 28),
-        age: randomInt(34, 58),
-        teamId,
-      };
-    })(),
-    (() => {
-      // DC: offenseRating = run defense, defenseRating = pass defense
-      const runDefense  = clampRating(dcOvr + randomInt(-8, 12));
-      const passDefense = clampRating(dcOvr + randomInt(-8, 12));
-      const developmentRating = clampRating(Math.round((runDefense + passDefense) / 2) + randomInt(-4, 4));
-      const role = 'DC';
-      const reputation = randomInt(38, 72);
-      return {
-        name: randomCoachName(),
-        role,
-        philosophy: pickDCPhilosophy(runDefense, passDefense),
-        developmentSpecialty: defensiveSpecialty,
-        aggression: defenseStyle === 'AGGRESSIVE' ? randomInt(72, 95) : randomInt(28, 66),
-        reputation,
-        overall: Math.round((runDefense + passDefense + developmentRating) / 3),
-        offenseRating: runDefense,
-        defenseRating: passDefense,
-        developmentRating,
-        salary: coachSalary(role, reputation),
-        contractYearsLeft: 3,
-        contractTotalYears: 3,
-        contractTotalCost: coachSalary(role, reputation) * 3,
-        hotSeat: randomInt(8, 28),
-        age: randomInt(34, 60),
-        teamId,
-      };
-    })(),
+    {
+      name: randomCoachName(),
+      position: 'HC',
+      overall: hcOverall,
+      stat1: hcOffense,
+      stat2: hcDefense,
+      age: hcAge,
+      salary: personnelSalary('HC', hcOverall, hcAge),
+      contractYearsLeft: 4,
+      yearsWithTeam: 1,
+      teamId,
+    },
+    {
+      name: randomCoachName(),
+      position: 'OC',
+      overall: ocOverall,
+      stat1: ocStat1,
+      stat2: ocStat2,
+      age: ocAge,
+      salary: personnelSalary('OC', ocOverall, ocAge),
+      contractYearsLeft: 3,
+      yearsWithTeam: 1,
+      teamId,
+    },
+    {
+      name: randomCoachName(),
+      position: 'DC',
+      overall: dcOverall,
+      stat1: dcStat1,
+      stat2: dcStat2,
+      age: dcAge,
+      salary: personnelSalary('DC', dcOverall, dcAge),
+      contractYearsLeft: 3,
+      yearsWithTeam: 1,
+      teamId,
+    },
   ];
 }
 
@@ -421,17 +375,13 @@ export function philosophyForStyle(offenseStyle: string): string {
 }
 
 async function clearAndSeed() {
-  await prisma.transferOffer.deleteMany();
-  await prisma.transferListing.deleteMany();
-  await prisma.tradeHistory.deleteMany();
   await prisma.retirementHistory.deleteMany();
   await prisma.teamSeasonHistory.deleteMany();
   await prisma.leagueSeasonHistory.deleteMany();
   await prisma.seasonHistory.deleteMany();
   await prisma.teamScheme.deleteMany();
-  await prisma.coach.deleteMany();
+  await prisma.personnel.deleteMany();
   await prisma.match.deleteMany();
-  await prisma.player.deleteMany();
   await prisma.team.deleteMany();
   await prisma.league.deleteMany();
   await seedWorld();

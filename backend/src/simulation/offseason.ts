@@ -4,13 +4,11 @@ import { finalizeCurrentSeason } from './seasonHistory';
 import { computeLeagueAwards, LeagueAwards } from './awards';
 import { runLeaguePlayoffs, LeaguePlayoffBracket } from './playoffs';
 import {
-  defenseStyleForCoachPhilosophy,
-  offenseStyleForCoachPhilosophy,
-  pickDCPhilosophy,
-  pickHeadCoachPhilosophy,
-  pickOCPhilosophy,
-} from './coachPhilosophy';
-import { deriveTeamIdentity, TeamIdentity } from './teamIdentity';
+  isCoachPosition,
+  offenseStyleForOC,
+  defenseStyleForDC,
+} from './personnel';
+import { clampRating, personnelSalary, randomCoachName, randomName, splitIntoStats } from '../seed';
 
 interface Movement {
   teamId: string;
@@ -42,7 +40,7 @@ interface Progression {
 
 interface CoachMove {
   teamName: string;
-  role: string;
+  position: string;
   outgoingName: string;
   incomingName: string;
   reason: 'FIRED' | 'RETIRED';
@@ -60,9 +58,6 @@ export interface OffseasonResult {
   nextSeasonWeekCount: number;
 }
 
-const FIRST_NAMES = ['Marcus', 'Darius', 'Jordan', 'Tyler', 'Chris', 'Mike', 'James', 'Aaron', 'Josh', 'Derek', 'Malik', 'Jalen'];
-const LAST_NAMES = ['Johnson', 'Williams', 'Smith', 'Brown', 'Davis', 'Wilson', 'Moore', 'Taylor', 'Jackson', 'Reed', 'Hall', 'Morgan'];
-
 export async function advanceOffseason(): Promise<OffseasonResult> {
   const archived = await finalizeCurrentSeason();
   const season = archived.season;
@@ -73,7 +68,6 @@ export async function advanceOffseason(): Promise<OffseasonResult> {
   const awards = await computeAndStoreAwards(season, leagues);
   const playoffs = await runAndStorePlayoffs(season, leagues);
 
-  // Fetched after playoffs so resultLabel reflects the playoff champion.
   const latestTeamHistories = await prisma.teamSeasonHistory.findMany({
     where: { season },
     orderBy: [{ tier: 'asc' }, { rank: 'asc' }],
@@ -82,8 +76,8 @@ export async function advanceOffseason(): Promise<OffseasonResult> {
   const movements = await applyPromotionRelegation(latestTeamHistories, leagueByTier);
   await updateCoachRecords(latestTeamHistories);
   const retirements = await applyPlayerLifecycle(season);
-  const progression = await applyProgressionAndContracts();
-  const coachMoves = await applyCoachMovement(latestTeamHistories);
+  const progression = await advanceContracts();
+  const coachMoves = await applyCoachMovement();
   await applyCoachIdentityToTeams();
   const nextSeasonWeekCount = await rebuildSchedule();
 
@@ -196,8 +190,13 @@ async function applyPromotionRelegation(
   return movements;
 }
 
+// Players age and retire on age thresholds. No progression / decline; players
+// keep their seeded ratings until they retire.
 async function applyPlayerLifecycle(season: number): Promise<Retirement[]> {
-  const players = await prisma.player.findMany({ where: { teamId: { not: null } }, include: { team: true } });
+  const players = await prisma.personnel.findMany({
+    where: { teamId: { not: null }, position: { notIn: ['HC', 'OC', 'DC'] } },
+    include: { team: true },
+  });
   const retirements: Retirement[] = [];
 
   for (const player of players) {
@@ -221,136 +220,74 @@ async function applyPlayerLifecycle(season: number): Promise<Retirement[]> {
           story,
         },
       });
-      await prisma.transferOffer.deleteMany({ where: { listing: { playerId: player.id } } });
-      await prisma.transferListing.deleteMany({ where: { playerId: player.id } });
-      await prisma.player.delete({ where: { id: player.id } });
+      await prisma.personnel.delete({ where: { id: player.id } });
       await createRookie(player.teamId, player.position);
       retirements.push({ playerName: player.name, teamName: player.team.name, age: newAge, overall: player.overall });
       continue;
     }
 
-    await prisma.player.update({
+    await prisma.personnel.update({
       where: { id: player.id },
-      data: {
-        age: newAge,
-      },
+      data: { age: newAge },
     });
   }
 
   return retirements;
 }
 
-async function applyProgressionAndContracts(): Promise<Progression> {
-  const players = await prisma.player.findMany({ where: { teamId: { not: null } }, include: { team: { include: { coaches: true } } } });
-  let improved = 0;
-  let declined = 0;
-  let freeAgentsListed = 0;
-
-  for (const player of players) {
-    if (!player.team || !player.teamId) continue;
-    const staff = player.team.coaches;
-    const specialtyBoost = staff.some((coach) => coach.developmentSpecialty === playerDevelopmentGroup(player.position)) ? 1 : 0;
-    const growth =
-      player.age <= 23 ? 2 :
-      player.age <= 26 ? 1 :
-      player.age >= 32 ? -2 :
-      player.age >= 30 ? -1 :
-      0;
-    const delta = Math.max(-4, Math.min(4, growth + (player.age <= 26 ? specialtyBoost : 0)));
-    const cap = player.potential;
-    const statHigh = Math.max(35, Math.min(cap, player.statHigh + delta));
-    const statLow  = Math.max(35, Math.min(cap, player.statLow  + delta));
-    const overall = Math.round((statHigh + statLow) / 2);
-    if (overall > player.overall) improved++;
-    if (overall < player.overall) declined++;
-
-    const yearsLeft = Math.max(0, player.contractYearsLeft - 1);
-    const shouldList = yearsLeft === 0 && player.overall >= 72;
-    await prisma.player.update({
-      where: { id: player.id },
-      data: {
-        statHigh,
-        statLow,
-        overall,
-        contractYearsLeft: shouldList ? 1 : yearsLeft,
-        extensionEligible: shouldList || player.age >= 27 || overall >= 82,
-      },
+// Just decrement contract years for everyone still under contract. No
+// progression / extension UI / market listing — stripped down.
+async function advanceContracts(): Promise<Progression> {
+  const rows = await prisma.personnel.findMany({
+    where: { teamId: { not: null } },
+    select: { id: true, contractYearsLeft: true },
+  });
+  for (const row of rows) {
+    const yearsLeft = Math.max(0, row.contractYearsLeft - 1);
+    await prisma.personnel.update({
+      where: { id: row.id },
+      data: { contractYearsLeft: yearsLeft },
     });
-
-    if (shouldList) {
-      await prisma.transferListing.upsert({
-        where: { playerId: player.id },
-        create: {
-          playerId: player.id,
-          sellerTeamId: player.teamId,
-          askingPrice: Math.round((overall * overall * 19_000 + player.salary * 1.5) / 100_000) * 100_000,
-        },
-        update: { status: 'ACTIVE' },
-      });
-      freeAgentsListed++;
-    }
   }
-
-  return { improved, declined, freeAgentsListed };
+  return { improved: 0, declined: 0, freeAgentsListed: 0 };
 }
 
-async function updateCoachRecords(histories: Array<{ teamId: string; rank: number; wins: number; losses: number; resultLabel: string }>): Promise<void> {
+async function updateCoachRecords(
+  histories: Array<{ teamId: string; resultLabel: string; wins: number; losses: number }>,
+): Promise<void> {
   for (const row of histories) {
-    const hotSeatDelta =
-      row.resultLabel === 'Champion' ? -22 :
-      row.resultLabel === 'Promoted' ? -16 :
-      row.resultLabel === 'Top Seed' ? -14 :
-      row.resultLabel === 'Playoff Appearance' ? -8 :
-      row.resultLabel === 'Relegation Danger' ? 22 :
-      row.resultLabel === 'Bottom Tier' ? 10 :
-      row.losses > row.wins ? 12 :
-      -3;
-    await prisma.coach.updateMany({
-      where: { teamId: row.teamId },
+    await prisma.personnel.updateMany({
+      where: { teamId: row.teamId, position: { in: ['HC', 'OC', 'DC'] } },
       data: {
         careerWins: { increment: row.wins },
         careerLosses: { increment: row.losses },
         titles: { increment: row.resultLabel === 'Champion' ? 1 : 0 },
-        hotSeat: { increment: hotSeatDelta },
         yearsWithTeam: { increment: 1 },
         age: { increment: 1 },
       },
     });
   }
-
-  const coaches = await prisma.coach.findMany({ select: { id: true, hotSeat: true, reputation: true } });
-  await Promise.all(coaches.map((coach) =>
-    prisma.coach.update({
-      where: { id: coach.id },
-      data: {
-        hotSeat: Math.max(0, Math.min(100, coach.hotSeat)),
-        reputation: Math.max(25, Math.min(99, coach.reputation + (coach.hotSeat < 20 ? 2 : coach.hotSeat > 75 ? -2 : 0))),
-      },
-    })
-  ));
 }
 
-async function applyCoachMovement(histories: Array<{ teamId: string; teamName: string; resultLabel: string; wins: number; losses: number }>): Promise<CoachMove[]> {
-  const teams = await prisma.team.findMany({ include: { coaches: true } });
-  const historyByTeam = new Map(histories.map((row) => [row.teamId, row]));
+async function applyCoachMovement(): Promise<CoachMove[]> {
+  const teams = await prisma.team.findMany({ include: { personnel: true } });
   const moves: CoachMove[] = [];
 
   for (const team of teams) {
-    const history = historyByTeam.get(team.id);
-    for (const coach of team.coaches) {
-      const shouldRetire = coach.age >= 67 && coach.reputation >= 70;
+    const coaches = team.personnel.filter((p) => isCoachPosition(p.position));
+    for (const coach of coaches) {
+      const shouldRetire = coach.age >= 67 && coach.overall >= 70;
       if (!shouldRetire) continue;
 
-      const reason: CoachMove['reason'] = 'RETIRED';
-      const replacement = buildReplacementCoach(team.id, coach.role, team.offenseStyle, team.defenseStyle, deriveTeamIdentity(team));
-      await prisma.coach.delete({ where: { id: coach.id } });
-      const incoming = await prisma.coach.create({ data: replacement as any });
+      const replacement = buildReplacementCoach(team.id, coach.position, team.offenseStyle, team.defenseStyle);
+      await prisma.personnel.delete({ where: { id: coach.id } });
+      const incoming = await prisma.personnel.create({ data: replacement });
       moves.push({
         teamName: team.name,
-        role: coach.role,
+        position: coach.position,
         outgoingName: coach.name,
         incomingName: incoming.name,
-        reason,
+        reason: 'RETIRED',
       });
     }
   }
@@ -359,12 +296,12 @@ async function applyCoachMovement(histories: Array<{ teamId: string; teamName: s
 }
 
 async function applyCoachIdentityToTeams(): Promise<void> {
-  const teams = await prisma.team.findMany({ include: { coaches: true } });
+  const teams = await prisma.team.findMany({ include: { personnel: true } });
   for (const team of teams) {
-    const oc = team.coaches.find((coach) => coach.role === 'OC');
-    const dc = team.coaches.find((coach) => coach.role === 'DC');
-    const offenseStyle = oc ? offenseStyleForCoachPhilosophy(oc.philosophy) ?? team.offenseStyle : team.offenseStyle;
-    const defenseStyle = dc ? defenseStyleForCoachPhilosophy(dc.philosophy) ?? team.defenseStyle : team.defenseStyle;
+    const oc = team.personnel.find((p) => p.position === 'OC');
+    const dc = team.personnel.find((p) => p.position === 'DC');
+    const offenseStyle = oc ? offenseStyleForOC(oc.stat1, oc.stat2) : team.offenseStyle;
+    const defenseStyle = dc ? defenseStyleForDC(dc.stat1, dc.stat2) : team.defenseStyle;
     await prisma.team.update({
       where: { id: team.id },
       data: {
@@ -376,7 +313,6 @@ async function applyCoachIdentityToTeams(): Promise<void> {
 }
 
 async function rebuildSchedule(): Promise<number> {
-  await prisma.transferOffer.deleteMany({ where: { listing: { status: { not: 'ACTIVE' } } } });
   await prisma.match.deleteMany();
 
   const leagues = await prisma.league.findMany({
@@ -407,92 +343,41 @@ async function rebuildSchedule(): Promise<number> {
 async function createRookie(teamId: string, position: string): Promise<void> {
   const base = ['QB', 'WR', 'CB', 'DE'].includes(position) ? 60 : 57;
   const overall = base + Math.floor(Math.random() * 8);
-  const potential = Math.min(92, overall + 10 + Math.floor(Math.random() * 14));
-  const delta = Math.floor(Math.random() * 5); // 0..4
-  const statHigh = Math.max(35, Math.min(99, overall + delta));
-  const statLow  = Math.max(35, Math.min(99, overall - delta));
-  await prisma.player.create({
+  const { stat1, stat2 } = splitIntoStats(overall);
+  const age = 21;
+  await prisma.personnel.create({
     data: {
-      name: `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`,
+      name: randomName(),
       position,
-      statHigh,
-      statLow,
-      overall: Math.round((statHigh + statLow) / 2),
-      potential,
-      age: 21,
-      salary: Math.round((700_000 + overall * overall * 260) / 100_000) * 100_000,
+      stat1,
+      stat2,
+      overall: Math.round((stat1 + stat2) / 2),
+      age,
+      salary: personnelSalary(position, overall, age),
       contractYearsLeft: 3,
-      extensionEligible: false,
+      yearsWithTeam: 1,
       teamId,
     },
   });
 }
 
-function playerDevelopmentGroup(position: string): string {
-  if (position === 'QB') return 'QB';
-  if (['RB', 'WR', 'TE'].includes(position)) return 'Skill';
-  if (position === 'OL') return 'OL';
-  if (['DE', 'DT'].includes(position)) return 'DL';
-  if (position === 'LB') return 'LB';
-  if (['CB', 'S'].includes(position)) return 'Secondary';
-  return 'Skill';
-}
-
-function buildReplacementCoach(teamId: string, role: string, offenseStyle: string, defenseStyle: string, identity?: TeamIdentity) {
-  const specialty =
-    role === 'OC' ? (offenseStyle === 'PASS_HEAVY' ? 'QB' : offenseStyle === 'RUN_HEAVY' ? 'OL' : 'Skill') :
-    role === 'DC' ? (defenseStyle === 'PREVENT' ? 'Secondary' : defenseStyle === 'AGGRESSIVE' ? 'DL' : 'LB') :
-    ['QB', 'Skill', 'OL', 'DL', 'LB', 'Secondary'][Math.floor(Math.random() * 6)];
+function buildReplacementCoach(teamId: string, position: string, offenseStyle: string, defenseStyle: string) {
   const baseRating = 50 + Math.floor(Math.random() * 20);
-  let offenseRating: number;
-  let defenseRating: number;
-  if (role === 'OC') {
-    // offenseRating = pass scheming, defenseRating = run scheming
-    offenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
-    defenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
-  } else if (role === 'DC') {
-    // offenseRating = run defense, defenseRating = pass defense
-    offenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
-    defenseRating = Math.max(35, Math.min(99, baseRating + Math.floor(Math.random() * 20) - 8));
-  } else {
-    offenseRating = Math.max(35, Math.min(99, baseRating + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
-    defenseRating = Math.max(35, Math.min(99, baseRating + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? 3 : 0) + Math.floor(Math.random() * 6) - 2));
-  }
-  const developmentRating =
-    role === 'OC' || role === 'DC'
-      ? Math.max(35, Math.min(99, Math.round((offenseRating + defenseRating) / 2) + Math.floor(Math.random() * 9) - 4))
-      : Math.round((offenseRating + defenseRating) / 2);
-  const reputation = 42 + Math.floor(Math.random() * 24);
+  const stat1 = clampRating(baseRating + (offenseStyle === 'PASS_HEAVY' || offenseStyle === 'RUN_HEAVY' ? 3 : 0) + Math.floor(Math.random() * 20) - 8);
+  const stat2 = clampRating(baseRating + (defenseStyle === 'AGGRESSIVE' || defenseStyle === 'PREVENT' ? 3 : 0) + Math.floor(Math.random() * 20) - 8);
+  const overall = Math.round((stat1 + stat2) / 2);
+  const age = 34 + Math.floor(Math.random() * 22);
+  const years = position === 'HC' ? 4 : 3;
   return {
-    name: `${FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]} ${LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]}`,
-    role,
-    philosophy:
-      role === 'OC' ? pickOCPhilosophy(offenseRating, defenseRating) :
-      role === 'DC' ? pickDCPhilosophy(offenseRating, defenseRating) :
-      role === 'HEAD_COACH' ? pickHeadCoachPhilosophy(offenseRating, defenseRating) :
-      'Balanced Playcaller',
-    developmentSpecialty: specialty,
-    aggression: defenseStyle === 'AGGRESSIVE' ? 76 : offenseStyle === 'PASS_HEAVY' ? 70 : 52,
-    reputation,
-    overall:
-      role === 'OC' || role === 'DC'
-        ? Math.round((offenseRating + defenseRating + developmentRating) / 3)
-        : Math.round((offenseRating + defenseRating) / 2),
-    offenseRating,
-    defenseRating,
-    developmentRating,
-    salary: coachSalary(role, reputation),
-    contractYearsLeft: role === 'HEAD_COACH' ? 4 : 3,
-    contractTotalYears: role === 'HEAD_COACH' ? 4 : 3,
-    contractTotalCost: coachSalary(role, reputation) * (role === 'HEAD_COACH' ? 4 : 3),
-    hotSeat: 18 + Math.floor(Math.random() * 18),
+    name: randomCoachName(),
+    position,
+    overall,
+    stat1,
+    stat2,
+    age,
+    salary: personnelSalary(position, overall, age),
+    contractYearsLeft: years,
     yearsWithTeam: 1,
-    age: 34 + Math.floor(Math.random() * 22),
     teamId,
   };
-}
-
-function coachSalary(role: string, reputation: number, titles = 0): number {
-  const rolePremium = role === 'HEAD_COACH' ? 1.8 : 1.0;
-  return Math.round((1_500_000 + reputation * reputation * 2_200 * rolePremium + titles * 850_000) / 100_000) * 100_000;
 }

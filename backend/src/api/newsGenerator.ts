@@ -1,4 +1,5 @@
 import { prisma } from '../db';
+import { isCoachPosition, personnelArchetype } from '../simulation/personnel';
 
 export interface NewsItem {
   headline: string;
@@ -126,9 +127,6 @@ export async function generateNewsFeed(limit = 3, leagueId?: string): Promise<Ne
   const streakItem = await findStreakStory(leagueId);
   if (streakItem) items.push(streakItem);
 
-  const tradeItem = await findTradeStory(leagueId);
-  if (tradeItem) items.push(tradeItem);
-
   // Sort by week desc (newest first), trim to limit
   const weeklyPool = items
     .sort((a, b) => b.week - a.week || newsPriority(b.category) - newsPriority(a.category))
@@ -142,8 +140,7 @@ async function generatePreseasonNews(limit: number, leagueId: string | undefined
     where: leagueId ? { leagueId } : undefined,
     include: {
       league: true,
-      coaches: true,
-      players: true,
+      personnel: true,
     },
   });
 
@@ -165,15 +162,15 @@ async function generatePreseasonNews(limit: number, leagueId: string | undefined
   }
 
   const identityCoach = teams
-    .flatMap((team) => team.coaches
-      .filter((coach) => coach.role === 'OC' || coach.role === 'DC')
+    .flatMap((team) => team.personnel
+      .filter((p) => p.position === 'OC' || p.position === 'DC')
       .map((coach) => ({ team, coach })))
-    .sort((a, b) => b.coach.reputation - a.coach.reputation)[0];
+    .sort((a, b) => b.coach.overall - a.coach.overall)[0];
 
   if (identityCoach) {
-    const side = identityCoach.coach.role === 'OC' ? 'offense' : 'defense';
+    const side = identityCoach.coach.position === 'OC' ? 'offense' : 'defense';
     items.push(withSource({
-      headline: `${identityCoach.team.name} lean into ${identityCoach.coach.philosophy}`,
+      headline: `${identityCoach.team.name} lean into ${personnelArchetype(identityCoach.coach)}`,
       summary: `${identityCoach.coach.name}'s ${side} gives them a clear Week 1 identity.`,
       category: 'COACH',
       week,
@@ -182,7 +179,9 @@ async function generatePreseasonNews(limit: number, leagueId: string | undefined
   }
 
   const playerWatch = teams
-    .flatMap((team) => team.players.map((player) => ({ team, player })))
+    .flatMap((team) => team.personnel
+      .filter((p) => !isCoachPosition(p.position))
+      .map((player) => ({ team, player })))
     .sort((a, b) => {
       const contractScore = Number(b.player.contractYearsLeft === 1) - Number(a.player.contractYearsLeft === 1);
       return contractScore || b.player.overall - a.player.overall;
@@ -297,8 +296,8 @@ function newsPriority(category: NewsItem['category']): number {
 }
 
 async function findCoachPressureStories(leagueId: string | undefined, currentWeek: number): Promise<NewsDraft[]> {
-  const coaches = await prisma.coach.findMany({
-    where: { role: 'HEAD_COACH', teamId: { not: null }, team: leagueId ? { leagueId } : undefined },
+  const coaches = await prisma.personnel.findMany({
+    where: { position: 'HC', teamId: { not: null }, team: leagueId ? { leagueId } : undefined },
     include: { team: { include: { league: true } } },
   });
 
@@ -309,20 +308,16 @@ async function findCoachPressureStories(leagueId: string | undefined, currentWee
     const form = await teamFormSnapshot(coach.team.id);
     const weakStart = currentWeek <= 5 && form.played >= 3 && form.losses >= form.wins + 2;
     const losingRun = form.streakType === 'L' && form.streak >= 3;
-    const hotSeat = coach.hotSeat >= 62;
-    if (!weakStart && !losingRun && !hotSeat) continue;
+    if (!weakStart && !losingRun) continue;
 
     const record = `${form.wins}-${form.losses}${form.ties ? `-${form.ties}` : ''}`;
+    const archetype = personnelArchetype(coach);
     const headline = weakStart
       ? `${coach.name} faces questions after ${coach.team.name}'s ${record} start`
-      : losingRun
-        ? `${coach.team.name} skid puts ${coach.name} on the hot seat`
-        : `${coach.name}'s seat heating up at ${coach.team.name}`;
+      : `${coach.team.name} skid puts ${coach.name} under the microscope`;
     const summary = weakStart
-      ? `${coach.team.name} expected a cleaner start, and the ${coach.philosophy} approach is already being picked apart.`
-      : losingRun
-        ? `${coach.team.name} have dropped ${form.streak} straight, raising pressure on a staff built around ${coach.philosophy}.`
-        : `${coach.hotSeat}/100 hot-seat pressure has turned every weekly decision into a referendum on ${coach.philosophy}.`;
+      ? `${coach.team.name} expected a cleaner start, and the ${archetype} approach is already being picked apart.`
+      : `${coach.team.name} have dropped ${form.streak} straight, raising pressure on a staff built around ${archetype}.`;
 
     stories.push({
       ...withSource({
@@ -332,8 +327,7 @@ async function findCoachPressureStories(leagueId: string | undefined, currentWee
         week: currentWeek,
         leagueName: coach.team.league.name,
       }, coach.team.name, leagueId),
-      score:
-        coach.hotSeat + form.losses * 8 + (losingRun ? 20 : 0) + (weakStart ? 24 : 0),
+      score: form.losses * 8 + (losingRun ? 20 : 0) + (weakStart ? 24 : 0),
     });
   }
 
@@ -341,8 +335,9 @@ async function findCoachPressureStories(leagueId: string | undefined, currentWee
 }
 
 async function findPlayerTensionStories(leagueId: string | undefined, currentWeek: number): Promise<NewsDraft[]> {
-  const players = await prisma.player.findMany({
+  const players = await prisma.personnel.findMany({
     where: {
+      position: { notIn: ['HC', 'OC', 'DC'] },
       team: leagueId ? { leagueId } : undefined,
       contractYearsLeft: 1,
       overall: { gte: 78 },
@@ -423,27 +418,6 @@ async function teamFormSnapshot(teamId: string): Promise<{ wins: number; losses:
   }
 
   return { wins, losses, ties, played: matches.length, streak, streakType: first };
-}
-
-async function findTradeStory(leagueId: string | undefined): Promise<NewsDraft | null> {
-  const leagueTeams = leagueId
-    ? await prisma.team.findMany({ where: { leagueId }, select: { id: true } })
-    : [];
-  const teamIds = new Set(leagueTeams.map((team) => team.id));
-  const trade = await prisma.tradeHistory.findFirst({
-    where: leagueId
-      ? { OR: [{ fromTeamId: { in: [...teamIds] } }, { toTeamId: { in: [...teamIds] } }] }
-      : undefined,
-    orderBy: { createdAt: 'desc' },
-  });
-  if (!trade) return null;
-
-  return withSource({
-    headline: `${trade.toTeamName} land ${trade.playerName}`,
-    summary: `${trade.fromTeamName} moved ${trade.playerName} for $${(trade.fee / 1_000_000).toFixed(1)}M as the market keeps shifting.`,
-    category: 'STANDINGS',
-    week: 0,
-  }, trade.toTeamName, leagueId);
 }
 
 async function findStreakStory(leagueId: string | undefined): Promise<NewsDraft | null> {

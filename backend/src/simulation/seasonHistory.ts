@@ -1,5 +1,6 @@
 import { prisma } from '../db';
 import { computeStandings, TeamRecord } from './standings';
+import { isCoachPosition } from './personnel';
 
 export interface FinalizeSeasonResult {
   season: number;
@@ -19,7 +20,7 @@ export async function finalizeCurrentSeason(): Promise<FinalizeSeasonResult> {
   const season = await nextSeasonNumber();
   const seasonHistory = await prisma.seasonHistory.create({ data: { season } });
   const leagues = await prisma.league.findMany({
-    include: { teams: { include: { players: true } } },
+    include: { teams: { include: { personnel: true } } },
     orderBy: { tier: 'asc' },
   });
 
@@ -100,19 +101,20 @@ async function nextSeasonNumber(): Promise<number> {
 
 function chooseMvp(
   standings: TeamRecord[],
-  teams: Array<{ id: string; name: string; players: Array<{ id: string; name: string; position: string; overall: number; potential: number; age: number }> }>,
+  teams: Array<{ id: string; name: string; personnel: Array<{ id: string; name: string; position: string; overall: number; age: number }> }>,
 ) {
   const rankByTeam = new Map(standings.map((row, index) => [row.teamId, index + 1]));
   const candidates = teams.flatMap((team) =>
-    team.players.map((player) => ({
-      ...player,
-      teamId: team.id,
-      teamName: team.name,
-      score: player.overall * 1.8 +
-        Math.max(0, player.potential - player.overall) * 0.35 +
-        (player.position === 'QB' ? 8 : ['WR', 'RB', 'DE', 'CB'].includes(player.position) ? 4 : 0) +
-        (9 - (rankByTeam.get(team.id) ?? 8)) * 2,
-    }))
+    team.personnel
+      .filter((p) => !isCoachPosition(p.position))
+      .map((player) => ({
+        ...player,
+        teamId: team.id,
+        teamName: team.name,
+        score: player.overall * 1.8 +
+          (player.position === 'QB' ? 8 : ['WR', 'RB', 'DE', 'CB'].includes(player.position) ? 4 : 0) +
+          (9 - (rankByTeam.get(team.id) ?? 8)) * 2,
+      }))
   );
   return candidates.sort((a, b) => b.score - a.score)[0] ?? null;
 }

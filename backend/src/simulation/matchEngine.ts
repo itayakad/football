@@ -25,13 +25,10 @@ export interface PlayerProfile {
 }
 
 export interface CoachProfile {
-  role: string;             // 'HEAD_COACH' | 'OC' | 'DC' | etc
+  position: string;         // 'HC' | 'OC' | 'DC'
   overall?: number;
-  offenseRating?: number;
-  defenseRating?: number;
-  developmentRating?: number;
-  philosophy?: string;
-  reputation?: number;
+  stat1?: number;           // HC: offense | OC: pass scheming | DC: run defense
+  stat2?: number;           // HC: defense | OC: run scheming  | DC: pass defense
 }
 
 export interface TeamMatchProfile {
@@ -195,13 +192,13 @@ interface CoachOVRs {
 }
 
 function extractCoachOVRs(coaches?: CoachProfile[]): CoachOVRs {
-  const hc = coaches?.find((c) => c.role === 'HEAD_COACH');
-  const oc = coaches?.find((c) => c.role === 'OC');
-  const dc = coaches?.find((c) => c.role === 'DC');
+  const hc = coaches?.find((c) => c.position === 'HC');
+  const oc = coaches?.find((c) => c.position === 'OC');
+  const dc = coaches?.find((c) => c.position === 'DC');
   return {
     hcOverall: coachOverall(hc),
-    hcOffense: hc?.offenseRating ?? hc?.overall ?? hc?.reputation ?? 60,
-    hcDefense: hc?.defenseRating ?? hc?.overall ?? hc?.reputation ?? 60,
+    hcOffense: hc?.stat1 ?? hc?.overall ?? 60,
+    hcDefense: hc?.stat2 ?? hc?.overall ?? 60,
     ocOverall: coachOverall(oc),
     dcOverall: coachOverall(dc),
   };
@@ -209,12 +206,10 @@ function extractCoachOVRs(coaches?: CoachProfile[]): CoachOVRs {
 
 function coachOverall(coach?: CoachProfile): number {
   if (!coach) return 60;
-  const off = coach.offenseRating ?? coach.overall ?? coach.reputation ?? 60;
-  const def = coach.defenseRating ?? coach.overall ?? coach.reputation ?? 60;
-  const dev = coach.developmentRating ?? coach.overall ?? coach.reputation ?? 60;
-  if (coach.role === 'OC') return Math.round((off + dev) / 2);
-  if (coach.role === 'DC') return Math.round((def + dev) / 2);
-  return Math.round((off + def) / 2);
+  if (typeof coach.overall === 'number') return coach.overall;
+  const s1 = coach.stat1 ?? 60;
+  const s2 = coach.stat2 ?? 60;
+  return Math.round((s1 + s2) / 2);
 }
 
 // ── Per-team match context ────────────────────────────────

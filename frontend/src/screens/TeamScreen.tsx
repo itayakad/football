@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
 import { DefensiveIdentity, OffensiveIdentity, PlayerFreeAgentResponse, RosterPlayer, RosterResponse } from '../api/types';
-import { ContractValue, formatMoney } from '../components/ContractValue';
+import { ContractValue } from '../components/ContractValue';
 import { ProfileSheet } from '../components/ProfileSheet';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useUserTeamId } from '../state/userTeam';
@@ -71,13 +71,6 @@ export const TeamScreen: React.FC = () => {
     },
   });
 
-  const saveDepth = useMutation({
-    mutationFn: (nextGroups: RosterGroup[]) => api.updateDepthChart(userTeamId!, nextGroups.flatMap((group) => group.players.map((player) => player.id))),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['roster', userTeamId] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard', userTeamId] });
-    },
-  });
 
   React.useEffect(() => {
     if (data) setGroups(data.groups);
@@ -105,9 +98,6 @@ export const TeamScreen: React.FC = () => {
   const defenseSlots = buildDefenseSlots(allPlayers);
   const starterIds = new Set([...offenseSlots, ...defenseSlots].map((slot) => slot.player?.id).filter(Boolean));
   const activeSlots = unit === 'offense' ? offenseSlots : defenseSlots;
-  const capPct = Math.min(100, Math.round((data.team.salaryUsed / data.team.salaryCap) * 100));
-  const capTone = capPct > 92 ? colors.warn : colors.accent.primary;
-  const capSpace = data.team.salaryCap - data.team.salaryUsed;
 
   const isStarter = selectedPlayer ? starterIds.has(selectedPlayer.id) : false;
   let subOptions: RosterPlayer[] = [];
@@ -138,7 +128,6 @@ export const TeamScreen: React.FC = () => {
       return group;
     });
     setGroups(nextGroups);
-    saveDepth.mutate(nextGroups);
     setSelectedPlayer(null);
   };
 
@@ -200,13 +189,12 @@ export const TeamScreen: React.FC = () => {
           <View style={styles.yardLineMiddle} />
           <View style={styles.yardLineBottom} />
 
-          <View style={styles.capSummary}>
-            <Text style={styles.capSummaryLabel}>Cap Space</Text>
-            <Text style={styles.capSummaryValue}>{formatMoney(capSpace)}</Text>
-            <View style={styles.capTrack}>
-              <View style={[styles.capFill, { width: `${capPct}%`, backgroundColor: capTone }]} />
-            </View>
-          </View>
+          <Pressable
+            onPress={() => navigation.navigate('ChooseScheme', { unit })}
+            style={({ pressed }) => [styles.schemeButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.schemeButtonText}>Change {unit === 'offense' ? 'Offensive' : 'Defensive'} Scheme</Text>
+          </Pressable>
 
           {unit === 'offense' ? (
             <>
@@ -274,13 +262,6 @@ export const TeamScreen: React.FC = () => {
               </View>
             </>
           )}
-
-          <Pressable
-            onPress={() => navigation.navigate('ChooseScheme', { unit })}
-            style={({ pressed }) => [styles.schemeButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.schemeButtonText}>Change {unit === 'offense' ? 'Offensive' : 'Defensive'} Scheme</Text>
-          </Pressable>
         </View>
       </View>
 
@@ -509,9 +490,9 @@ function PlayerProfile({
                   >
                     <View style={styles.fireCandidateAvatar}>
                       <Ionicons
-                        name={freeAgent.schemeFit ? schemeFitIcon(freeAgent.schemeFit.label) : 'person-add-outline'}
+                        name={'person-add-outline'}
                         size={20}
-                        color={freeAgent.schemeFit ? schemeFitColor(freeAgent.schemeFit.label) : colors.accent.primary}
+                        color={colors.accent.primary}
                       />
                     </View>
                     <Text style={[typography.body, styles.fireCandidateNameCol]} numberOfLines={1}>
@@ -600,8 +581,8 @@ function StaffCard({ coach, onPress }: { coach: Coach; onPress: () => void }) {
       style={({ pressed }) => [styles.staffCard, pressed && styles.pressed]}
     >
       <View style={styles.staffCardTop}>
-        <Text style={styles.slotLabel}>{coachRoleShort(coach.role)}</Text>
-        <Text style={[styles.cardOverall, { color: hotSeatColor(coach.hotSeat) }]}>{coach.reputation}</Text>
+        <Text style={styles.slotLabel}>{coach.position}</Text>
+        <Text style={[styles.cardOverall, { color: colors.accent.primary }]}>{coach.overall}</Text>
       </View>
       <View style={styles.cardAvatar}>
         <Text style={styles.cardAvatarText}>{initials(coach.name)}</Text>
@@ -645,7 +626,7 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
   if (!coach) return null;
 
   const topCandidates = (coachMarket?.candidates ?? [])
-    .filter((c) => c.role === coach.role)
+    .filter((c) => c.position === coach.position)
     .sort((a, b) => b.overall - a.overall)
     .slice(0, 5);
 
@@ -654,7 +635,7 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
       visible
       onClose={onClose}
       name={coach.name}
-      subtitle={coachRoleLabel(coach.role)}
+      subtitle={coachPositionLabel(coach.position)}
       initials={initials(coach.name)}
       action={{
         label: showFire ? 'Back' : 'Fire',
@@ -688,7 +669,7 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
                     </Text>
                     <View style={styles.fireCandidateSpacer} />
                     <View style={styles.fireCandidateCostCol}>
-                      <ContractValue amount={candidate.contract.totalCost} years={candidate.contract.totalYears} compact />
+                      <ContractValue amount={candidate.salary} years={candidate.contractYearsLeft} compact perYear />
                     </View>
                     <Text style={[typography.heading, styles.fireCandidateOvrCol, { color: colors.accent.primary }]}>{candidate.overall}</Text>
                   </Pressable>
@@ -703,15 +684,8 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
                         </View>
                         <View style={styles.fireExpandBars}>
                           <RatingBar label="Overall" value={candidate.overall} thick />
-                          {candidate.role !== 'DC' && (
-                            <RatingBar label="Offense" value={candidate.offenseRating} />
-                          )}
-                          {candidate.role !== 'OC' && (
-                            <RatingBar label="Defense" value={candidate.defenseRating} />
-                          )}
-                          {candidate.role !== 'HEAD_COACH' && (
-                            <RatingBar label="Development" value={candidate.developmentRating} />
-                          )}
+                          <RatingBar label={candidate.statLabels[0]} value={candidate.stat1} />
+                          <RatingBar label={candidate.statLabels[1]} value={candidate.stat2} />
                         </View>
                       </View>
                       <Pressable
@@ -736,7 +710,7 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
         <>
           <View style={styles.profileSection}>
             <View style={styles.playStyleRow}>
-              <Text style={typography.body}>{coach.philosophy}</Text>
+              <Text style={typography.body}>{coach.archetype}</Text>
               <View style={styles.playStyleIconCircle}>
                 <Ionicons
                   name={coachPlayStyleIcon(coach)}
@@ -745,21 +719,12 @@ function CoachProfile({ coach, onClose }: { coach: Coach | null; onClose: () => 
                 />
               </View>
               <View style={{ flex: 1 }} />
-              <ContractValue amount={coach.contract.totalCost} years={coach.contract.totalYears} compact />
+              <ContractValue amount={coach.salary} years={coach.contractYearsLeft} compact perYear />
             </View>
 
             <RatingBar label="Overall" value={coach.overall} thick />
-            <RatingBar
-              label={coach.role === 'OC' ? 'Pass Scheming' : coach.role === 'DC' ? 'Run Defense' : 'Offense'}
-              value={coach.offenseRating}
-            />
-            <RatingBar
-              label={coach.role === 'OC' ? 'Run Scheming' : coach.role === 'DC' ? 'Pass Defense' : 'Defense'}
-              value={coach.defenseRating}
-            />
-            {coach.role !== 'HEAD_COACH' && (
-              <RatingBar label="Development" value={coach.developmentRating} />
-            )}
+            <RatingBar label={coach.statLabels[0]} value={coach.stat1} />
+            <RatingBar label={coach.statLabels[1]} value={coach.stat2} />
           </View>
 
           <View style={styles.statRow}>
@@ -817,12 +782,12 @@ const HC_PHILOSOPHY_LEAN: Record<string, HCLean> = {
   'Stonewall Strategist':'VERY_DEFENSE',
 };
 
-type CoachLike = { role: string; philosophy: string; offenseRating?: number; defenseRating?: number };
+type CoachLike = { position: string; archetype: string; stat1?: number; stat2?: number };
 
 function hcLeanFromCoach(coach: CoachLike): HCLean {
-  const fromName = HC_PHILOSOPHY_LEAN[coach.philosophy];
+  const fromName = HC_PHILOSOPHY_LEAN[coach.archetype];
   if (fromName) return fromName;
-  const diff = (coach.offenseRating ?? 60) - (coach.defenseRating ?? 60);
+  const diff = (coach.stat1 ?? 60) - (coach.stat2 ?? 60);
   if (diff >= 15) return 'VERY_OFFENSE';
   if (diff >= 5)  return 'OFFENSE';
   if (diff > -5)  return 'BALANCED';
@@ -858,22 +823,22 @@ function hcLeanColor(lean: HCLean): string {
 }
 
 function coachPlayStyleIcon(coach: CoachLike): IoniconName {
-  if (coach.role === 'HEAD_COACH') return HC_PHILOSOPHY_ICON[coach.philosophy] ?? hcLeanFallbackIcon(hcLeanFromCoach(coach));
-  if (coach.role === 'DC') {
-    const id = DEFENSIVE_PHILOSOPHY_IDENTITY[coach.philosophy] ?? 'BALANCED';
+  if (coach.position === 'HC') return HC_PHILOSOPHY_ICON[coach.archetype] ?? hcLeanFallbackIcon(hcLeanFromCoach(coach));
+  if (coach.position === 'DC') {
+    const id = DEFENSIVE_PHILOSOPHY_IDENTITY[coach.archetype] ?? 'BALANCED';
     return defensiveIdentityIcon(id);
   }
-  const id = OFFENSIVE_PHILOSOPHY_IDENTITY[coach.philosophy] ?? 'BALANCED';
+  const id = OFFENSIVE_PHILOSOPHY_IDENTITY[coach.archetype] ?? 'BALANCED';
   return offensiveIdentityIcon(id);
 }
 
 function coachPlayStyleColor(coach: CoachLike): string {
-  if (coach.role === 'HEAD_COACH') return hcLeanColor(hcLeanFromCoach(coach));
-  if (coach.role === 'DC') {
-    const id = DEFENSIVE_PHILOSOPHY_IDENTITY[coach.philosophy] ?? 'BALANCED';
+  if (coach.position === 'HC') return hcLeanColor(hcLeanFromCoach(coach));
+  if (coach.position === 'DC') {
+    const id = DEFENSIVE_PHILOSOPHY_IDENTITY[coach.archetype] ?? 'BALANCED';
     return defensiveIdentityColor(id);
   }
-  const id = OFFENSIVE_PHILOSOPHY_IDENTITY[coach.philosophy] ?? 'BALANCED';
+  const id = OFFENSIVE_PHILOSOPHY_IDENTITY[coach.archetype] ?? 'BALANCED';
   return offensiveIdentityColor(id);
 }
 
@@ -957,22 +922,11 @@ function defensiveIdentityColor(identity: DefensiveIdentity): string {
   return colors.identity.bal;
 }
 
-function hotSeatColor(value: number): string {
-  if (value >= 75) return colors.danger;
-  if (value >= 50) return colors.warn;
-  return colors.success;
-}
-
-function coachRoleShort(role: string): string {
-  if (role === 'HEAD_COACH') return 'HC';
-  return role;
-}
-
-function coachRoleLabel(role: string): string {
-  if (role === 'HEAD_COACH') return 'Head Coach';
-  if (role === 'OC') return 'Offensive Coordinator';
-  if (role === 'DC') return 'Defensive Coordinator';
-  return role;
+function coachPositionLabel(position: string): string {
+  if (position === 'HC') return 'Head Coach';
+  if (position === 'OC') return 'Offensive Coordinator';
+  if (position === 'DC') return 'Defensive Coordinator';
+  return position;
 }
 
 function playerPositionLabel(position: string): string {
@@ -1020,6 +974,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   schemeButton: {
+    width: '92%',
+    alignSelf: 'center',
     minHeight: 38,
     borderRadius: radius.md,
     backgroundColor: colors.bg.elevated,
@@ -1027,7 +983,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: spacing.xs,
   },
   schemeButtonText: {
     ...typography.label,
@@ -1085,35 +1040,6 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     flexShrink: 1,
     minWidth: 0,
-  },
-  capSummary: {
-    width: '92%',
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  capSummaryLabel: {
-    ...typography.label,
-    color: colors.text.secondary,
-    textTransform: 'uppercase',
-  },
-  capSummaryValue: {
-    ...typography.caption,
-    color: colors.text.primary,
-    fontWeight: '800',
-    minWidth: 58,
-  },
-  capTrack: {
-    flex: 1,
-    height: 7,
-    borderRadius: radius.pill,
-    backgroundColor: colors.bg.surface,
-    overflow: 'hidden',
-  },
-  capFill: {
-    height: '100%',
-    borderRadius: radius.pill,
   },
   identityIconRow: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
 import {
   MeResponse, DashboardResponse, MatchPreviewResponse, SimulateResponse, Gameplan,
-  LeagueStandingsResponse, RosterResponse, MarketResponse, HistoryResponse,
+  LeagueStandingsResponse, RosterResponse, HistoryResponse,
   OffseasonResponse, CoachMarketResponse, PlayerFreeAgentResponse,
   OffensivePhilosophy,
   SchemeUnit, TeamScheme,
@@ -60,12 +60,6 @@ export const api = {
       body: JSON.stringify({ offensivePhilosophy }),
     }),
 
-  updateDepthChart: (teamId: string, playerIds: string[]) =>
-    request<{ ok: true }>(`/api/team/${teamId}/depth-chart`, {
-      method: 'PATCH',
-      body: JSON.stringify({ playerIds }),
-    }),
-
   schemes: (teamId: string, unit?: SchemeUnit) =>
     request<{ schemes: TeamScheme[] }>(`/api/team/${teamId}/schemes${unit ? `?unit=${unit}` : ''}`),
 
@@ -95,44 +89,11 @@ export const api = {
       body: JSON.stringify({ teamId }),
     }),
 
-  market: (teamId: string) =>
-    request<MarketResponse>(`/api/market?teamId=${teamId}`),
-
   playerFreeAgents: (teamId: string, position: string, limit = 5) =>
     request<PlayerFreeAgentResponse>(`/api/players/free-agents?teamId=${teamId}&position=${encodeURIComponent(position)}&limit=${limit}`),
 
   signFreeAgent: (teamId: string, playerId: string) =>
     request<{ ok: true }>(`/api/players/free-agents/${playerId}/sign`, {
-      method: 'POST',
-      body: JSON.stringify({ teamId }),
-    }),
-
-  listPlayer: (teamId: string, playerId: string) =>
-    request<{ id: string }>('/api/market/list', {
-      method: 'POST',
-      body: JSON.stringify({ teamId, playerId }),
-    }),
-
-  buyListing: (listingId: string, buyerTeamId: string) =>
-    request<{ ok: true }>(`/api/market/${listingId}/buy`, {
-      method: 'POST',
-      body: JSON.stringify({ buyerTeamId }),
-    }),
-
-  delistPlayer: (listingId: string, teamId: string) =>
-    request<{ ok: true }>(`/api/market/${listingId}`, {
-      method: 'DELETE',
-      body: JSON.stringify({ teamId }),
-    }),
-
-  acceptOffer: (offerId: string, teamId: string) =>
-    request<{ ok: true }>(`/api/market/offers/${offerId}/accept`, {
-      method: 'POST',
-      body: JSON.stringify({ teamId }),
-    }),
-
-  rejectOffer: (offerId: string, teamId: string) =>
-    request<{ ok: true }>(`/api/market/offers/${offerId}/reject`, {
       method: 'POST',
       body: JSON.stringify({ teamId }),
     }),

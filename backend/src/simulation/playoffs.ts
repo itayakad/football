@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import { simulateMatch, TeamMatchProfile } from './matchEngine';
 import { chooseAIGameplan } from './aiCoach';
 import { normalizePlayLoadout } from './playLibrary';
+import { isCoachPosition } from './personnel';
 
 export type PlayoffRound = 'WILD_CARD' | 'SEMI' | 'FINAL';
 
@@ -50,19 +51,13 @@ interface TeamLike {
   name: string;
   offensivePlays: unknown;
   defensivePlays: unknown;
-  coaches: Array<{
-    role: string;
-    overall: number;
-    offenseRating: number;
-    defenseRating: number;
-    reputation: number;
-  }>;
-  players: Array<{
+  personnel: Array<{
     id: string;
     name: string;
     position: string;
     overall: number;
-    potential: number;
+    stat1: number;
+    stat2: number;
     age: number;
   }>;
 }
@@ -71,7 +66,7 @@ export async function runLeaguePlayoffs(season: number, leagueId: string, league
   const top6Rows = await prisma.teamSeasonHistory.findMany({
     where: { season, team: { leagueId }, rank: { lte: 6 } },
     orderBy: { rank: 'asc' },
-    include: { team: { include: { players: true, coaches: true } } },
+    include: { team: { include: { personnel: true } } },
   });
 
   if (top6Rows.length < 6) {
@@ -126,19 +121,24 @@ async function playPlayoffMatch(
   round: PlayoffRound,
   week: number,
 ): Promise<PlayoffMatchOutcome> {
+  const homeCoaches = home.team.personnel.filter((p) => isCoachPosition(p.position));
+  const homePlayers = home.team.personnel.filter((p) => !isCoachPosition(p.position));
+  const awayCoaches = away.team.personnel.filter((p) => isCoachPosition(p.position));
+  const awayPlayers = away.team.personnel.filter((p) => !isCoachPosition(p.position));
+
   const homeProfile: TeamMatchProfile = {
     id:       home.team.id,
     name:     home.team.name,
-    coaches:  home.team.coaches as any,
-    players:  home.team.players,
+    coaches:  homeCoaches,
+    players:  homePlayers,
     offensivePlays: normalizePlayLoadout('offense', home.team.offensivePlays),
     defensivePlays: normalizePlayLoadout('defense', home.team.defensivePlays),
   };
   const awayProfile: TeamMatchProfile = {
     id:       away.team.id,
     name:     away.team.name,
-    coaches:  away.team.coaches as any,
-    players:  away.team.players,
+    coaches:  awayCoaches,
+    players:  awayPlayers,
     offensivePlays: normalizePlayLoadout('offense', away.team.offensivePlays),
     defensivePlays: normalizePlayLoadout('defense', away.team.defensivePlays),
   };

@@ -1,4 +1,5 @@
 import { prisma } from '../db';
+import { isCoachPosition } from './personnel';
 
 const OFFENSE_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'OL'];
 const DEFENSE_POSITIONS = ['DE', 'DT', 'LB', 'CB', 'S'];
@@ -34,7 +35,6 @@ interface ScoredPlayer {
     name: string;
     position: string;
     overall: number;
-    potential: number;
     age: number;
   };
   teamName: string;
@@ -46,7 +46,7 @@ export async function computeLeagueAwards(season: number, leagueId: string): Pro
   const histories = await prisma.teamSeasonHistory.findMany({
     where: { season, team: { leagueId } },
     orderBy: { rank: 'asc' },
-    include: { team: { include: { players: true, coaches: true } } },
+    include: { team: { include: { personnel: true } } },
   });
 
   if (histories.length === 0) {
@@ -55,12 +55,14 @@ export async function computeLeagueAwards(season: number, leagueId: string): Pro
 
   const totalTeams = histories.length;
   const scored: ScoredPlayer[] = histories.flatMap((row) =>
-    row.team.players.map((player) => ({
-      player,
-      teamName: row.teamName,
-      teamRank: row.rank,
-      score: scorePlayer(player, row.rank, totalTeams),
-    }))
+    row.team.personnel
+      .filter((p) => !isCoachPosition(p.position))
+      .map((player) => ({
+        player,
+        teamName: row.teamName,
+        teamRank: row.rank,
+        score: scorePlayer(player, row.rank, totalTeams),
+      }))
   );
 
   const mvp = pickTop(scored, () => true);
@@ -69,7 +71,7 @@ export async function computeLeagueAwards(season: number, leagueId: string): Pro
   const roty = pickTop(scored, (p) => p.player.age <= 22);
 
   const bestTeam = histories[0];
-  const hc = bestTeam.team.coaches.find((coach) => coach.role === 'HEAD_COACH');
+  const hc = bestTeam.team.personnel.find((p) => p.position === 'HC');
   const hcoty: CoachAward | null = hc ? {
     coachId:   hc.id,
     coachName: hc.name,
@@ -82,7 +84,7 @@ export async function computeLeagueAwards(season: number, leagueId: string): Pro
 }
 
 function scorePlayer(
-  player: { overall: number; potential: number; position: string },
+  player: { overall: number; position: string },
   teamRank: number,
   totalTeams: number,
 ): number {
@@ -91,8 +93,7 @@ function scorePlayer(
     ['WR', 'RB', 'DE', 'CB'].includes(player.position) ? 4 :
     0;
   const teamBonus = (totalTeams + 1 - teamRank) * 2;
-  const upside = Math.max(0, player.potential - player.overall) * 0.35;
-  return player.overall * 1.8 + upside + positionalBoost + teamBonus;
+  return player.overall * 1.8 + positionalBoost + teamBonus;
 }
 
 function pickTop(scored: ScoredPlayer[], filter: (p: ScoredPlayer) => boolean): PlayerAward | null {

@@ -230,11 +230,11 @@ const TeamProfileModal: React.FC<{
 }> = ({ team, rank, onClose }) => {
   const coaches = useMemo(() => {
     if (!team) return [];
-    const byRole = new Map(team.coaches.map((coach) => [coach.role, coach]));
+    const byPosition = new Map(team.coaches.map((coach) => [coach.position, coach]));
     return [
-      { label: 'HC', coach: byRole.get('HEAD_COACH') },
-      { label: 'OC', coach: byRole.get('OC') },
-      { label: 'DC', coach: byRole.get('DC') },
+      { label: 'HC', coach: byPosition.get('HC') },
+      { label: 'OC', coach: byPosition.get('OC') },
+      { label: 'DC', coach: byPosition.get('DC') },
     ];
   }, [team]);
 
@@ -284,7 +284,7 @@ const TeamProfileModal: React.FC<{
                     <Text style={typography.body}>{coach?.name ?? 'Vacant'}</Text>
                     {coach && (
                       <Text style={typography.caption} numberOfLines={1}>
-                        {coach.philosophy} / Rep {coach.reputation}
+                        {coach.archetype} / {coach.overall} OVR
                       </Text>
                     )}
                   </View>

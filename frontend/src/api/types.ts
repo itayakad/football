@@ -19,6 +19,10 @@ export type OffensivePhilosophy =
   | 'QUICK_GAME'
   | 'PLAY_ACTION_HEAVY';
 
+export type CoachPosition = 'HC' | 'OC' | 'DC';
+export type PlayerPosition = 'QB' | 'RB' | 'WR' | 'TE' | 'OL' | 'DE' | 'DT' | 'LB' | 'CB' | 'S';
+export type Position = CoachPosition | PlayerPosition;
+
 export type SchemeUnit = 'offense' | 'defense';
 export type OffensiveCategory = 'RUNNING' | 'SHORT_PASS' | 'MIDDLE_PASS' | 'LONG_PASS';
 export type DefensiveCategory = 'ZONE' | 'BLITZ' | 'ZONE_BLITZ' | 'MAN';
@@ -200,9 +204,9 @@ export interface LeagueStandingsResponse {
     coaches: Array<{
       id:         string;
       name:       string;
-      role:       'HEAD_COACH' | 'OC' | 'DC';
-      philosophy: string;
-      reputation: number;
+      position:   CoachPosition;
+      archetype:  string;
+      overall:    number;
     }>;
     topPlayers: Array<{
       id:       string;
@@ -214,21 +218,44 @@ export interface LeagueStandingsResponse {
   }>;
 }
 
+export interface Coach {
+  id:                string;
+  name:              string;
+  position:          CoachPosition;
+  overall:           number;
+  stat1:             number;
+  stat2:             number;
+  statLabels:        [string, string];
+  archetype:         string;
+  careerWins:        number;
+  careerLosses:      number;
+  titles:            number;
+  salary:            number;
+  contractYearsLeft: number;
+  contract: {
+    salary:    number;
+    yearsLeft: number;
+    totalCost: number;
+  };
+  yearsWithTeam:     number;
+  age:               number;
+}
+
 export interface RosterPlayer {
   id:            string;
   name:          string;
   position:      string;
   overall:       number;
-  potential:     number;
   age:           number;
-  depthOrder:    number;
+  stat1:         number;
+  stat2:         number;
+  statLabels:    [string, string];
   archetype:     string;
   attributes:    Record<string, number>;
   yearsWithClub: number;
   contract: {
-    yearsLeft:          number;
-    salary:             number;
-    extensionEligible:  boolean;
+    yearsLeft: number;
+    salary:    number;
   };
   schemeFit: {
     label:  'Excellent Fit' | 'Solid Fit' | 'Development Fit';
@@ -246,33 +273,7 @@ export interface RosterResponse {
     offensivePhilosophy: OffensivePhilosophy;
     salaryCap:     number;
     salaryUsed:    number;
-    coaches: Array<{
-      id:                   string;
-      name:                 string;
-      role:                 'HEAD_COACH' | 'OC' | 'DC';
-      philosophy:           string;
-      developmentSpecialty: string;
-      aggression:           number;
-      reputation:           number;
-      overall:              number;
-      offenseRating:        number;
-      defenseRating:        number;
-      developmentRating:    number;
-      careerWins:           number;
-      careerLosses:         number;
-      titles:               number;
-      salary:               number;
-      contractYearsLeft:    number;
-      contract: {
-        salary:     number;
-        yearsLeft:  number;
-        totalYears: number;
-        totalCost:  number;
-      };
-      hotSeat:              number;
-      yearsWithTeam:        number;
-      age:                  number;
-    }>;
+    coaches:       Coach[];
   };
   schemes: TeamScheme[];
   playTemplates: {
@@ -288,99 +289,36 @@ export interface RosterResponse {
 
 export interface CoachMarketResponse {
   team: {
-    id: string;
+    id:    string;
     money: number;
   };
-  candidates: Array<{
-    id:                   string;
-    name:                 string;
-    role:                 'HEAD_COACH' | 'OC' | 'DC';
-    philosophy:           string;
-    developmentSpecialty: string;
-    aggression:           number;
-    reputation:           number;
-    overall:              number;
-    offenseRating:        number;
-    defenseRating:        number;
-    developmentRating:    number;
-    careerWins:           number;
-    careerLosses:         number;
-    titles:               number;
-    salary:               number;
-    contractYearsLeft:    number;
-    contract: {
-      salary:     number;
-      yearsLeft:  number;
-      totalYears: number;
-      totalCost:  number;
-    };
-    hotSeat:              number;
-    yearsWithTeam:        number;
-    age:                  number;
-    cost:                 number;
-    story:                string;
-    canHire:              boolean;
+  candidates: Array<Coach & {
+    cost:    number;
+    story:   string;
+    canHire: boolean;
   }>;
 }
 
-export interface MarketPlayer {
-  id:        string;
-  name:      string;
-  position:  string;
-  overall:   number;
-  potential: number;
-  age:       number;
-  archetype: string;
-  value:     number;
-  story:     string;
+export interface FreeAgentPlayer {
+  id:         string;
+  name:       string;
+  position:   string;
+  overall:    number;
+  age:        number;
+  stat1:      number;
+  stat2:      number;
+  statLabels: [string, string];
+  archetype:  string;
+  attributes: Record<string, number>;
   contract: {
-    yearsLeft:         number;
-    salary:            number;
-    extensionEligible: boolean;
+    yearsLeft: number;
+    salary:    number;
   };
-  schemeFit: {
-    label:  'Excellent Fit' | 'Solid Fit' | 'Development Fit';
-    detail: string;
-  };
+  canSign: boolean;
 }
 
 export interface PlayerFreeAgentResponse {
-  candidates: Array<MarketPlayer & {
-    attributes: Record<string, number>;
-    canSign: boolean;
-  }>;
-}
-
-export interface MarketResponse {
-  team: {
-    id:         string;
-    name:       string;
-    money:      number;
-    salaryCap:  number;
-    salaryUsed: number;
-    capSpace:   number;
-  };
-  listings: Array<{
-    id:          string;
-    askingPrice: number;
-    sellerTeam: {
-      id:           string;
-      name:         string;
-      identity:     TeamIdentity;
-    };
-    player: MarketPlayer;
-    canBuy: boolean;
-  }>;
-  incomingOffers: Array<{
-    id:     string;
-    amount: number;
-    buyerTeam: {
-      id:           string;
-      name:         string;
-      identity:     TeamIdentity;
-    };
-    player: MarketPlayer;
-  }>;
+  candidates: FreeAgentPlayer[];
 }
 
 export interface HistoryResponse {
@@ -409,15 +347,7 @@ export interface HistoryResponse {
     mvpTeamName:      string | null;
     biggestGame:      string | null;
   }>;
-  trades: Array<{
-    id:           string;
-    season:       number;
-    playerName:   string;
-    fromTeamName: string;
-    toTeamName:   string;
-    fee:          number;
-    story:        string;
-  }>;
+  trades: Array<unknown>;
 }
 
 export interface PlayerAward {
@@ -498,7 +428,7 @@ export interface OffseasonResponse {
   };
   coachMoves: Array<{
     teamName: string;
-    role: string;
+    position: CoachPosition;
     outgoingName: string;
     incomingName: string;
     reason: 'FIRED' | 'RETIRED' | 'POACHED';
