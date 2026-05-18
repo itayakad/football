@@ -1031,7 +1031,6 @@ const styles = StyleSheet.create({
   identityValue: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
     gap: 4,
     minWidth: 0,
   },

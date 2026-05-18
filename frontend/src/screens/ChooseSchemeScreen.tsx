@@ -1,10 +1,11 @@
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { RouteProp, useRoute } from '@react-navigation/native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { NavigationProp, RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
 
 import { api } from '../api/client';
-import { PlayTemplate, RosterPlayer, TeamScheme } from '../api/types';
+import { PlayCategory, PlayTemplate, RosterPlayer, TeamScheme } from '../api/types';
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionLabel } from '../components/SectionLabel';
@@ -15,14 +16,18 @@ import { templatesForUnit } from '../data/playTemplates';
 
 export const ChooseSchemeScreen: React.FC = () => {
   const route = useRoute<RouteProp<RootStackParamList, 'ChooseScheme'>>();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { unit } = route.params;
   const userTeamId = useUserTeamId();
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [draftName, setDraftName] = React.useState('');
   const [draftPlays, setDraftPlays] = React.useState<string[]>([]);
-  const [selectedPlayId, setSelectedPlayId] = React.useState<string | null>(null);
-  const [showSubOptions, setShowSubOptions] = React.useState(false);
+  const [expandedPlayId, setExpandedPlayId] = React.useState<string | null>(null);
+  const [subFromPlayId, setSubFromPlayId] = React.useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = React.useState<PlayCategory | 'ALL'>('ALL');
+  const [nameQuery, setNameQuery] = React.useState('');
+  const [sortByOvr, setSortByOvr] = React.useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['schemes', userTeamId, unit],
@@ -38,6 +43,10 @@ export const ChooseSchemeScreen: React.FC = () => {
 
   const schemes = data?.schemes ?? [];
   const templates = templatesForUnit(unit);
+  const unitCategories = React.useMemo(
+    () => Array.from(new Set(templates.map((t) => t.category))),
+    [templates],
+  );
   const active = schemes.find((scheme) => scheme.id === activeId) ?? schemes[0] ?? null;
 
   React.useEffect(() => {
@@ -45,8 +54,8 @@ export const ChooseSchemeScreen: React.FC = () => {
     setActiveId(active.id);
     setDraftName(active.name);
     setDraftPlays(active.plays);
-    setSelectedPlayId(null);
-    setShowSubOptions(false);
+    setExpandedPlayId(null);
+    setSubFromPlayId(null);
   }, [active?.id]);
 
   const refresh = () => {
@@ -103,34 +112,84 @@ export const ChooseSchemeScreen: React.FC = () => {
     .map((id) => templates.find((template) => template.id === id))
     .filter((template): template is PlayTemplate => !!template);
   const selectedIds = new Set(draftPlays);
-  const availableTemplates = templates.filter((template) => !selectedIds.has(template.id));
-  const selectedPlay = selectedPlayId ? templates.find((template) => template.id === selectedPlayId) ?? null : null;
-  const selectedPlayIsInScheme = selectedPlay ? selectedIds.has(selectedPlay.id) : false;
+  const trimmedQuery = nameQuery.trim().toLowerCase();
+  let availableTemplates = templates.filter((template) => !selectedIds.has(template.id));
+  if (categoryFilter !== 'ALL') {
+    availableTemplates = availableTemplates.filter((t) => t.category === categoryFilter);
+  }
+  if (trimmedQuery) {
+    availableTemplates = availableTemplates.filter((t) => t.name.toLowerCase().includes(trimmedQuery));
+  }
+  if (sortByOvr) {
+    availableTemplates = [...availableTemplates].sort(
+      (a, b) => (playOverall(b, slotMap) ?? 0) - (playOverall(a, slotMap) ?? 0),
+    );
+  }
+  const subMode = subFromPlayId != null;
+  const sourceInScheme = subFromPlayId ? selectedIds.has(subFromPlayId) : false;
+  const visibleSelected = subMode
+    ? (sourceInScheme ? selectedTemplates.filter((t) => t.id === subFromPlayId) : selectedTemplates)
+    : selectedTemplates;
+  const visibleAvailable = subMode
+    ? (sourceInScheme
+        ? availableTemplates
+        : (templates.filter((t) => t.id === subFromPlayId)))
+    : availableTemplates;
+  const filtersActive = categoryFilter !== 'ALL' || trimmedQuery.length > 0;
 
-  const replacePlay = (nextPlayId: string) => {
-    if (!selectedPlayId || draftPlays.includes(nextPlayId)) return;
-    setDraftPlays(draftPlays.map((id) => (id === selectedPlayId ? nextPlayId : id)));
-    setSelectedPlayId(null);
-    setShowSubOptions(false);
+  const togglePlay = (playId: string) => {
+    setExpandedPlayId((prev) => (prev === playId ? null : playId));
   };
 
-  const replaceSelectedSlot = (currentSelectedId: string) => {
-    if (!selectedPlayId || selectedIds.has(selectedPlayId) || !draftPlays.includes(currentSelectedId)) return;
-    setDraftPlays(draftPlays.map((id) => (id === currentSelectedId ? selectedPlayId : id)));
-    setSelectedPlayId(null);
-    setShowSubOptions(false);
+  const enterSubMode = (sourcePlayId: string) => {
+    setSubFromPlayId(sourcePlayId);
+    setExpandedPlayId(null);
   };
 
-  const openPlay = (playId: string) => {
-    setSelectedPlayId(playId);
-    setShowSubOptions(false);
+  const exitSubMode = () => {
+    setSubFromPlayId(null);
+    setExpandedPlayId(null);
+  };
+
+  const confirmSwap = (candidateId: string) => {
+    if (!subFromPlayId) return;
+    if (sourceInScheme) {
+      if (selectedIds.has(candidateId)) return;
+      setDraftPlays(draftPlays.map((id) => (id === subFromPlayId ? candidateId : id)));
+    } else {
+      if (!selectedIds.has(candidateId)) return;
+      setDraftPlays(draftPlays.map((id) => (id === candidateId ? subFromPlayId : id)));
+    }
+    setSubFromPlayId(null);
+    setExpandedPlayId(null);
+  };
+
+  const subPropsFor = (playId: string) => {
+    if (!subMode) return { label: 'Sub', onPress: () => enterSubMode(playId) };
+    if (playId === subFromPlayId) return { label: 'Cancel', onPress: exitSubMode };
+    return { label: 'Sub', onPress: () => confirmSwap(playId) };
   };
 
   return (
     <ScreenContainer>
-      <View>
-        <Text style={typography.label}>{unit === 'offense' ? 'Offensive' : 'Defensive'} Scheme</Text>
-        <Text style={[typography.display, styles.title]}>Choose Scheme</Text>
+      <View style={styles.identityBlock}>
+        <View style={styles.identityTopRow}>
+          <View style={styles.identityLabelGroup}>
+            <Text style={styles.identityHeaderLabel}>{unit === 'offense' ? 'Offensive Scheme' : 'Defensive Scheme'}</Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            onPress={() => navigation.goBack()}
+            style={({ pressed }) => [styles.homeButton, pressed && styles.homeButtonPressed]}
+          >
+            <Ionicons name="home-outline" size={16} color={colors.text.primary} />
+            <Text style={styles.homeButtonText}>Home</Text>
+          </Pressable>
+        </View>
+        <View style={styles.identityValue}>
+          <Text style={styles.identityArchetype} numberOfLines={1}>Choose Scheme</Text>
+        </View>
       </View>
 
       <View style={styles.schemeTabs}>
@@ -182,181 +241,196 @@ export const ChooseSchemeScreen: React.FC = () => {
             {draftPlays.length}/9
           </Text>
         </View>
-        <Card padded={false}>
-          {selectedTemplates.map((template, index) => (
-            <PlayRow
-              key={template.id}
-              template={template}
-              slotMap={slotMap}
-              isLast={index === selectedTemplates.length - 1}
-              onPress={() => openPlay(template.id)}
-            />
-          ))}
-        </Card>
+        <View style={styles.playList}>
+          {visibleSelected.map((template) => {
+            const sub = subPropsFor(template.id);
+            const expanded = expandedPlayId === template.id;
+            const isSource = subFromPlayId === template.id;
+            return (
+              <PlayCard
+                key={template.id}
+                template={template}
+                slotMap={slotMap}
+                isExpanded={expanded}
+                showAction={isSource || expanded}
+                onToggle={() => togglePlay(template.id)}
+                onPressSub={sub.onPress}
+                subLabel={sub.label}
+              />
+            );
+          })}
+        </View>
       </View>
 
       <View>
         <SectionLabel>Available Plays</SectionLabel>
-        <Card padded={false}>
-          {availableTemplates.map((template, index) => (
-            <PlayRow
-              key={template.id}
-              template={template}
-              slotMap={slotMap}
-              isLast={index === availableTemplates.length - 1}
-              onPress={() => openPlay(template.id)}
-            />
-          ))}
-        </Card>
+        {!subMode && (
+          <View style={styles.filterBlock}>
+            <View style={styles.searchRow}>
+              <TextInput
+                value={nameQuery}
+                onChangeText={setNameQuery}
+                placeholder="Search plays by name"
+                placeholderTextColor={colors.text.muted}
+                style={[styles.input, styles.searchInput]}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {nameQuery.length > 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                  onPress={() => setNameQuery('')}
+                  style={styles.searchClear}
+                >
+                  <Ionicons name="close" size={16} color={colors.text.secondary} />
+                </Pressable>
+              )}
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRowContent}
+            >
+              <Pressable
+                onPress={() => setCategoryFilter('ALL')}
+                style={[styles.categoryChip, categoryFilter === 'ALL' && styles.categoryChipActive]}
+              >
+                <Text
+                  style={[
+                    styles.categoryChipText,
+                    categoryFilter === 'ALL' && styles.categoryChipTextActive,
+                  ]}
+                >
+                  All
+                </Text>
+              </Pressable>
+              {unitCategories.map((category) => {
+                const sample = templates.find((t) => t.category === category);
+                if (!sample) return null;
+                const isActive = categoryFilter === category;
+                return (
+                  <Pressable
+                    key={category}
+                    onPress={() => setCategoryFilter(category)}
+                    style={[styles.categoryChip, isActive && styles.categoryChipActive]}
+                  >
+                    <View style={[styles.categoryChipStripe, { backgroundColor: sample.categoryColor }]} />
+                    <Text style={[styles.categoryChipText, isActive && styles.categoryChipTextActive]}>
+                      {sample.categoryLabel}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                onPress={() => setSortByOvr((prev) => !prev)}
+                style={[styles.sortToggle, sortByOvr && styles.sortToggleActive]}
+              >
+                <Ionicons
+                  name="swap-vertical"
+                  size={12}
+                  color={sortByOvr ? colors.bg.base : colors.text.secondary}
+                />
+                <Text style={[styles.sortToggleText, sortByOvr && styles.sortToggleTextActive]}>
+                  Sort: OVR
+                </Text>
+              </Pressable>
+            </ScrollView>
+          </View>
+        )}
+        <View style={styles.playList}>
+          {visibleAvailable.length === 0 && filtersActive ? (
+            <Text style={styles.emptyText}>No plays match your filters.</Text>
+          ) : (
+            visibleAvailable.map((template) => {
+              const sub = subPropsFor(template.id);
+              const expanded = expandedPlayId === template.id;
+              const isSource = subFromPlayId === template.id;
+              return (
+                <PlayCard
+                  key={template.id}
+                  template={template}
+                  slotMap={slotMap}
+                  isExpanded={expanded}
+                  showAction={isSource || expanded}
+                  onToggle={() => togglePlay(template.id)}
+                  onPressSub={sub.onPress}
+                  subLabel={sub.label}
+                />
+              );
+            })
+          )}
+        </View>
       </View>
-
-      <ReplacePlaySheet
-        play={selectedPlay}
-        isSelected={selectedPlayIsInScheme}
-        slotMap={slotMap}
-        options={selectedPlayIsInScheme ? availableTemplates : selectedTemplates}
-        showSubOptions={showSubOptions}
-        onShowSubOptions={() => setShowSubOptions(true)}
-        onReplace={replacePlay}
-        onReplaceSelectedSlot={replaceSelectedSlot}
-        onClose={() => setSelectedPlayId(null)}
-      />
     </ScreenContainer>
   );
 };
 
-function PlayRow({
+function PlayCard({
   template,
   slotMap,
-  disabled,
-  isLast,
-  onPress,
+  isExpanded,
+  showAction,
+  onToggle,
+  onPressSub,
+  subLabel,
 }: {
   template: PlayTemplate;
   slotMap: Record<string, RosterPlayer | undefined>;
-  disabled?: boolean;
-  isLast?: boolean;
-  onPress?: () => void;
+  isExpanded: boolean;
+  showAction: boolean;
+  onToggle: () => void;
+  onPressSub: () => void;
+  subLabel: string;
 }) {
   const overall = playOverall(template, slotMap);
+  const isCancel = subLabel === 'Cancel';
   return (
-    <Pressable disabled={disabled || !onPress} onPress={onPress} style={[styles.playRow, !isLast && styles.playRowBorder, disabled && styles.playRowDisabled]}>
-      <View style={[styles.categoryStripe, { backgroundColor: template.categoryColor }]} />
-      <View style={styles.playRowMain}>
-        <View style={styles.playRowTitle}>
+    <View style={[styles.playCard, isExpanded && styles.playCardExpanded]}>
+      <Pressable onPress={onToggle} style={styles.playCardRow}>
+        <View style={[styles.categoryStripe, { backgroundColor: template.categoryColor }]} />
+        <View style={styles.playCardMain}>
           <View style={{ flex: 1 }}>
             <Text style={styles.playName} numberOfLines={1}>{template.name}</Text>
             <Text style={[styles.familyText, { color: template.categoryColor }]}>{template.categoryLabel}</Text>
           </View>
-        </View>
-        <View style={styles.rowOvrBlock}>
-          <Text style={styles.rowOvrText}>{overall ?? '--'}</Text>
-          <Text style={styles.rowOvrLabel}>OVR</Text>
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-function ReplacePlaySheet({
-  play,
-  isSelected,
-  slotMap,
-  options,
-  showSubOptions,
-  onShowSubOptions,
-  onReplace,
-  onReplaceSelectedSlot,
-  onClose,
-}: {
-  play: PlayTemplate | null;
-  isSelected: boolean;
-  slotMap: Record<string, RosterPlayer | undefined>;
-  options: PlayTemplate[];
-  showSubOptions: boolean;
-  onShowSubOptions: () => void;
-  onReplace: (playId: string) => void;
-  onReplaceSelectedSlot: (playId: string) => void;
-  onClose: () => void;
-}) {
-  if (!play) return null;
-  const playOvr = playOverall(play, slotMap);
-  return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.detailCard}>
-            <View style={styles.detailTopRow}>
-              <View style={styles.playOvrBlock}>
-                <Text style={styles.ovrNumber}>{playOvr ?? '--'}</Text>
-                <Text style={styles.ovrLabel}>OVR</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={typography.label}>{play.categoryLabel}</Text>
-                <Text style={styles.sheetTitle}>{play.name}</Text>
-              </View>
-              <View style={styles.detailActionBlock}>
-                <Pressable
-                  onPress={onShowSubOptions}
-                  style={styles.subButton}
-                >
-                  <Text style={styles.subButtonText}>Sub</Text>
-                </Pressable>
-                {isSelected && <Text style={styles.selectedText}>Selected</Text>}
-              </View>
-            </View>
-
-            <PlaySketch play={play} />
-
-            <View style={styles.playerChipRow}>
-              {play.keySlots.map((slot, index) => {
-                const player = slotMap[slot];
-                return (
-                  <View key={`${slot}-${index}`} style={styles.playerChip}>
-                    <View style={styles.playerIcon}>
-                      <Text style={styles.playerIconText}>{player ? initials(player.name) : slot.slice(0, 2)}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.playerName} numberOfLines={1}>{player ? shortName(player.name) : slot}</Text>
-                      <Text style={styles.slotText}>{slot}{player ? ` / ${player.overall}` : ''}</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
+          <View style={styles.rowOvrBlock}>
+            <Text style={styles.rowOvrText}>{overall ?? '--'}</Text>
+            <Text style={styles.rowOvrLabel}>OVR</Text>
           </View>
-
-          {showSubOptions && (
-            <ScrollView contentContainerStyle={{ gap: spacing.md }} showsVerticalScrollIndicator={false}>
-              <SectionLabel>{isSelected ? 'Eligible Plays' : 'Replace Selected Play'}</SectionLabel>
-              {options.map((option) => {
-                const optionOvr = playOverall(option, slotMap);
-                return (
-                  <Pressable
-                    key={option.id}
-                    style={styles.subOptionRow}
-                    onPress={() => isSelected ? onReplace(option.id) : onReplaceSelectedSlot(option.id)}
-                  >
-                    <View style={styles.smallOvrBlock}>
-                      <Text style={styles.smallOvrText}>{optionOvr ?? '--'}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.playName}>{option.name}</Text>
-                      <Text style={styles.slotText}>{option.keySlots.join(' / ')}</Text>
-                    </View>
-                    <Text style={[styles.familyText, { color: option.categoryColor }]}>{option.categoryLabel}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          )}
-
-          <Pressable onPress={onClose} style={styles.closeSheetButton}>
-            <Text style={styles.closeSheetText}>Close</Text>
-          </Pressable>
         </View>
-      </View>
-    </Modal>
+      </Pressable>
+      {(isExpanded || showAction) && (
+        <View style={styles.playExpand}>
+          {isExpanded && (
+            <>
+              <PlaySketch play={template} />
+              <View style={styles.playerChipRow}>
+                {template.keySlots.map((slot, index) => {
+                  const player = slotMap[slot];
+                  return (
+                    <View key={`${slot}-${index}`} style={styles.playerChip}>
+                      <View style={styles.playerIcon}>
+                        <Text style={styles.playerIconText}>{player ? initials(player.name) : slot.slice(0, 2)}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.playerName} numberOfLines={1}>{player ? shortName(player.name) : slot}</Text>
+                        <Text style={styles.slotText}>{slot}{player ? ` / ${player.overall}` : ''}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            </>
+          )}
+          {showAction && (
+            <Pressable onPress={onPressSub} style={[styles.subButton, isCancel && styles.subButtonCancel]}>
+              <Text style={[styles.subButtonText, isCancel && styles.subButtonCancelText]}>{subLabel}</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -450,7 +524,58 @@ function shortName(name: string): string {
 }
 
 const styles = StyleSheet.create({
-  title: { marginTop: spacing.xs },
+  identityBlock: {
+    gap: spacing.xs,
+  },
+  identityTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  identityLabelGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 1,
+    gap: spacing.xs,
+  },
+  identityHeaderLabel: {
+    ...typography.heading,
+    color: colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  homeButton: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: colors.bg.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  homeButtonPressed: {
+    backgroundColor: colors.bg.elevated,
+  },
+  homeButtonText: {
+    ...typography.label,
+    color: colors.text.primary,
+  },
+  identityValue: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 4,
+    minWidth: 0,
+  },
+  identityArchetype: {
+    ...typography.display,
+    color: colors.text.primary,
+    flexShrink: 1,
+    minWidth: 0,
+  },
   schemeTabs: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -550,25 +675,29 @@ const styles = StyleSheet.create({
     color: colors.warn,
     fontWeight: '800',
   },
-  playRow: {
+  playList: {
+    gap: spacing.sm,
+  },
+  playCard: {
+    backgroundColor: colors.bg.elevated,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    overflow: 'hidden',
+  },
+  playCardExpanded: {
+    borderColor: colors.accent.primary,
+  },
+  playCardRow: {
     minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.bg.elevated,
-    overflow: 'hidden',
-  },
-  playRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  playRowDisabled: {
-    opacity: 0.58,
   },
   categoryStripe: {
     width: 4,
     alignSelf: 'stretch',
   },
-  playRowMain: {
+  playCardMain: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -576,11 +705,32 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     padding: spacing.md,
   },
-  playRowTitle: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
+  playExpand: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
     gap: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  subButton: {
+    paddingVertical: spacing.md,
+    backgroundColor: colors.accent.primary,
+    borderRadius: radius.md,
+    alignItems: 'center',
+  },
+  subButtonText: {
+    ...typography.label,
+    color: colors.bg.elevated,
+    fontWeight: '800',
+  },
+  subButtonCancel: {
+    backgroundColor: colors.bg.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  subButtonCancelText: {
+    color: colors.text.primary,
   },
   playName: {
     ...typography.caption,
@@ -615,71 +765,6 @@ const styles = StyleSheet.create({
     color: colors.text.muted,
     marginBottom: spacing.xs,
     fontSize: 10,
-  },
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.62)',
-  },
-  sheet: {
-    maxHeight: '82%',
-    backgroundColor: colors.bg.elevated,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    padding: spacing.lg,
-    gap: spacing.lg,
-  },
-  detailCard: {
-    gap: spacing.md,
-  },
-  detailTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.md,
-  },
-  playOvrBlock: {
-    width: 58,
-    minHeight: 58,
-    borderRadius: radius.md,
-    backgroundColor: colors.bg.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ovrNumber: {
-    ...typography.heading,
-    color: colors.accent.primary,
-    fontSize: 24,
-  },
-  ovrLabel: {
-    ...typography.caption,
-    color: colors.text.muted,
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  detailActionBlock: {
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  subButton: {
-    minWidth: 58,
-    minHeight: 36,
-    borderRadius: radius.sm,
-    backgroundColor: colors.accent.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-  },
-  subButtonText: {
-    ...typography.label,
-    color: colors.bg.base,
-    fontWeight: '800',
-  },
-  selectedText: {
-    ...typography.caption,
-    color: colors.success,
-    fontWeight: '800',
   },
   sketch: {
     height: 150,
@@ -746,61 +831,88 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: '700',
   },
-  smallOvrBlock: {
-    width: 42,
-    height: 42,
-    borderRadius: radius.sm,
+  filterBlock: {
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  searchRow: {
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  searchInput: {
+    marginTop: 0,
+    paddingRight: 36,
+  },
+  searchClear: {
+    position: 'absolute',
+    right: spacing.sm,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.bg.elevated,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  smallOvrText: {
-    ...typography.heading,
-    color: colors.accent.primary,
-    fontSize: 16,
+  chipRowContent: {
+    gap: spacing.sm,
+    paddingRight: spacing.sm,
   },
-  closeSheetButton: {
-    minHeight: 42,
-    borderRadius: radius.md,
-    backgroundColor: colors.bg.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeSheetText: {
-    ...typography.label,
-    color: colors.text.primary,
-    fontWeight: '800',
-  },
-  sheetHeader: {
+  categoryChip: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.md,
-  },
-  sheetTitle: {
-    ...typography.title,
-    fontSize: 22,
-  },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.bg.surface,
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeText: {
-    ...typography.heading,
-    color: colors.text.secondary,
-  },
-  subOptionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: spacing.md,
+    gap: 6,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
     backgroundColor: colors.bg.surface,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    gap: spacing.md,
+  },
+  categoryChipActive: {
+    backgroundColor: colors.accent.primary,
+    borderColor: colors.accent.primary,
+  },
+  categoryChipStripe: {
+    width: 4,
+    height: 14,
+    borderRadius: 2,
+  },
+  categoryChipText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontWeight: '700',
+  },
+  categoryChipTextActive: {
+    color: colors.bg.base,
+  },
+  sortToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.bg.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sortToggleActive: {
+    backgroundColor: colors.accent.primary,
+    borderColor: colors.accent.primary,
+  },
+  sortToggleText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontWeight: '700',
+  },
+  sortToggleTextActive: {
+    color: colors.bg.base,
+  },
+  emptyText: {
+    ...typography.caption,
+    color: colors.text.muted,
+    paddingVertical: spacing.md,
+    textAlign: 'center',
   },
 });

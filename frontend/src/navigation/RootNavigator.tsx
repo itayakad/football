@@ -70,7 +70,7 @@ export function RootNavigator() {
       <Stack.Screen
         name="ChooseScheme"
         component={ChooseSchemeScreen}
-        options={{ title: 'Choose Scheme' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="MatchSim"
