@@ -73,6 +73,22 @@ model TeamScheme {
   @@unique([teamId, unit, name])
 }
 
+// Global catalog of every play in the game. Teams pick 9 offensive + 9
+// defensive plays from this table by id (referenced from TeamScheme.plays
+// and Team.offensivePlays/defensivePlays as JSON arrays of ids).
+model Play {
+  id        String   @id              // stable slug, e.g. "inside_zone"
+  unit      String                    // 'offense' | 'defense'
+  name      String
+  category  String                    // OffensiveCategory | DefensiveCategory
+  keySlots  Json                      // exactly 3 PlayerSlot strings
+  sortOrder Int      @default(0)      // canonical display order within unit
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([unit, sortOrder])
+}
+
 // Unified roster model covering coaches (HC/OC/DC) and players (QB/RB/WR/...).
 // Stat labels and archetype/philosophy names are derived from `position` at read time.
 model Personnel {

@@ -87,103 +87,79 @@ export function defensiveMatchupMod(off: OffensiveCategory, def: DefensiveCatego
 }
 
 // ── Play library ──────────────────────────────────────────
+//
+// The catalog lives in the Play table (Prisma model). Call loadPlayCatalog()
+// once at process boot — every sync accessor below reads from the cache it
+// populates and throws if it's missing.
 
-const o = (id: string, name: string, category: OffensiveCategory, keySlots: [PlayerSlot, PlayerSlot, PlayerSlot]): OffensivePlay => ({
-  id, name, unit: 'offense', category, keySlots,
-});
+let _offensivePlays: OffensivePlay[] | null = null;
+let _defensivePlays: DefensivePlay[] | null = null;
+let _allPlays: Play[] | null = null;
+let _playById: Map<string, Play> | null = null;
 
-const d = (id: string, name: string, category: DefensiveCategory, keySlots: [PlayerSlot, PlayerSlot, PlayerSlot]): DefensivePlay => ({
-  id, name, unit: 'defense', category, keySlots,
-});
+interface PrismaPlayClient {
+  play: {
+    findMany: (args: { orderBy?: { sortOrder?: 'asc' | 'desc' } }) => Promise<Array<{
+      id: string;
+      unit: string;
+      name: string;
+      category: string;
+      keySlots: unknown;
+      sortOrder: number;
+    }>>;
+  };
+}
 
-export const OFFENSIVE_PLAYS: OffensivePlay[] = [
-  // RUNNING (6) — RB + OL slots dominate base strength
-  o('inside_zone',    'Inside Zone',    'RUNNING', ['RB',  'G', 'C']),
-  o('outside_zone',   'Outside Zone',   'RUNNING', ['RB',  'T', 'G']),
-  o('power',          'Power',          'RUNNING', ['RB',  'G', 'T']),
-  o('counter',        'Counter',        'RUNNING', ['RB',  'G', 'T']),
-  o('lead_iso',       'Lead Iso',       'RUNNING', ['RB',  'C', 'G']),
-  o('toss_sweep',     'Toss Sweep',     'RUNNING', ['RB',  'T', 'WR']),
+export async function loadPlayCatalog(prisma: PrismaPlayClient): Promise<void> {
+  const rows = await prisma.play.findMany({ orderBy: { sortOrder: 'asc' } });
+  const offense: OffensivePlay[] = [];
+  const defense: DefensivePlay[] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row.keySlots) || row.keySlots.length !== 3) {
+      throw new Error(`Play ${row.id} has invalid keySlots: ${JSON.stringify(row.keySlots)}`);
+    }
+    const slots = row.keySlots as [PlayerSlot, PlayerSlot, PlayerSlot];
+    if (row.unit === 'offense') {
+      offense.push({ id: row.id, unit: 'offense', name: row.name, category: row.category as OffensiveCategory, keySlots: slots });
+    } else if (row.unit === 'defense') {
+      defense.push({ id: row.id, unit: 'defense', name: row.name, category: row.category as DefensiveCategory, keySlots: slots });
+    } else {
+      throw new Error(`Play ${row.id} has invalid unit: ${row.unit}`);
+    }
+  }
+  _offensivePlays = offense;
+  _defensivePlays = defense;
+  _allPlays = [...offense, ...defense];
+  _playById = new Map(_allPlays.map((p) => [p.id, p]));
+}
 
-  // SHORT PASS (6) — QB + underneath route runners
-  o('slants',         'Slants',         'SHORT_PASS', ['QB', 'WR', 'WR']),
-  o('stick',          'Stick',          'SHORT_PASS', ['QB', 'TE', 'WR']),
-  o('mesh',           'Mesh',           'SHORT_PASS', ['QB', 'WR', 'WR']),
-  o('quick_out',      'Quick Out',      'SHORT_PASS', ['QB', 'WR', 'WR']),
-  o('bubble_screen',  'Bubble Screen',  'SHORT_PASS', ['QB', 'WR', 'G']),
-  o('hitch',          'Hitch',          'SHORT_PASS', ['QB', 'WR', 'TE']),
-
-  // MIDDLE PASS (6) — QB + intermediate threats
-  o('levels',         'Levels',         'MIDDLE_PASS', ['QB', 'WR', 'TE']),
-  o('y_cross',        'Y-Cross',        'MIDDLE_PASS', ['QB', 'TE', 'WR']),
-  o('drive',          'Drive',          'MIDDLE_PASS', ['QB', 'WR', 'WR']),
-  o('curl_flat',      'Curl Flat',      'MIDDLE_PASS', ['QB', 'WR', 'RB']),
-  o('pa_boot',        'PA Boot',        'MIDDLE_PASS', ['QB', 'TE', 'RB']),
-  o('snag',           'Snag',           'MIDDLE_PASS', ['QB', 'WR', 'WR']),
-
-  // LONG PASS (6) — QB + deep threats + protection
-  o('four_verticals', 'Four Verticals', 'LONG_PASS', ['QB', 'WR', 'T']),
-  o('post_wheel',     'Post-Wheel',     'LONG_PASS', ['QB', 'WR', 'RB']),
-  o('sail',           'Sail',           'LONG_PASS', ['QB', 'WR', 'TE']),
-  o('air_six',        'Air Six',        'LONG_PASS', ['QB', 'WR', 'T']),
-  o('pa_crossers',    'PA Crossers',    'LONG_PASS', ['QB', 'WR', 'WR']),
-  o('take_shot',      'Take Shot',      'LONG_PASS', ['QB', 'WR', 'WR']),
-];
-
-export const DEFENSIVE_PLAYS: DefensivePlay[] = [
-  // ZONE (6) — safeties + linebackers
-  d('cover_2',         'Cover 2',         'ZONE', ['FS',  'SS',  'MLB']),
-  d('cover_3',         'Cover 3',         'ZONE', ['FS',  'MLB', 'CB1']),
-  d('cover_4',         'Cover 4 Quarters','ZONE', ['FS',  'SS',  'CB1']),
-  d('cover_6',         'Cover 6',         'ZONE', ['FS',  'SS',  'CB2']),
-  d('tampa_2',         'Tampa 2',         'ZONE', ['FS',  'MLB', 'SS']),
-  d('cover_3_cloud',   'Cover 3 Cloud',   'ZONE', ['CB1', 'FS',  'MLB']),
-
-  // BLITZ (6) — pure pressure
-  d('edge_blitz',      'Edge Blitz',      'BLITZ', ['EDGE1', 'EDGE2', 'MLB']),
-  d('inside_blitz',    'Inside Blitz',    'BLITZ', ['DT1',   'MLB',   'WLB']),
-  d('safety_blitz',    'Safety Blitz',    'BLITZ', ['SS',    'MLB',   'EDGE1']),
-  d('cover_0_blitz',   'Cover 0 Blitz',   'BLITZ', ['MLB',   'EDGE1', 'CB1']),
-  d('slot_blitz',      'Slot Blitz',      'BLITZ', ['NCB',   'MLB',   'EDGE1']),
-  d('double_a_gap',    'Double-A Gap',    'BLITZ', ['MLB',   'WLB',   'DT1']),
-
-  // ZONE BLITZ (6) — pressure with zone drop
-  d('fire_zone',       'Fire Zone',       'ZONE_BLITZ', ['MLB', 'EDGE1', 'FS']),
-  d('ncaa_blitz',      'NCAA Blitz',      'ZONE_BLITZ', ['WLB', 'EDGE2', 'SS']),
-  d('cross_dog',       'Cross Dog',       'ZONE_BLITZ', ['MLB', 'WLB',   'DT1']),
-  d('five_under',      'Five Under',      'ZONE_BLITZ', ['NCB', 'MLB',   'FS']),
-  d('three_deep_pres', 'Three-Deep Pressure', 'ZONE_BLITZ', ['EDGE1', 'MLB', 'CB1']),
-  d('sim_pressure',    'Sim Pressure',    'ZONE_BLITZ', ['WLB', 'DT1',   'FS']),
-
-  // MAN (6) — coverage-first
-  d('cover_1',         'Cover 1',         'MAN', ['CB1', 'CB2', 'FS']),
-  d('cover_1_robber',  'Cover 1 Robber',  'MAN', ['CB1', 'SS',  'MLB']),
-  d('cover_2_man',     'Cover 2 Man',     'MAN', ['CB1', 'CB2', 'FS']),
-  d('cover_0_man',     'Cover 0 Man',     'MAN', ['CB1', 'CB2', 'MLB']),
-  d('match_man',       'Match Man',       'MAN', ['NCB', 'CB1', 'MLB']),
-  d('press_man',       'Press Man',       'MAN', ['CB1', 'CB2', 'EDGE1']),
-];
-
-export const ALL_PLAYS: Play[] = [...OFFENSIVE_PLAYS, ...DEFENSIVE_PLAYS];
-
-const PLAY_BY_ID = new Map<string, Play>(ALL_PLAYS.map((p) => [p.id, p]));
+function requireCatalog<T>(value: T | null): T {
+  if (value == null) {
+    throw new Error('Play catalog not loaded — call loadPlayCatalog(prisma) at process boot before using play library helpers.');
+  }
+  return value;
+}
 
 export function playById(id: string): Play | undefined {
-  return PLAY_BY_ID.get(id);
+  return requireCatalog(_playById).get(id);
 }
 
 export function offensivePlayById(id: string): OffensivePlay | undefined {
-  const p = PLAY_BY_ID.get(id);
+  const p = requireCatalog(_playById).get(id);
   return p?.unit === 'offense' ? p : undefined;
 }
 
 export function defensivePlayById(id: string): DefensivePlay | undefined {
-  const p = PLAY_BY_ID.get(id);
+  const p = requireCatalog(_playById).get(id);
   return p?.unit === 'defense' ? p : undefined;
 }
 
 export function playsForUnit(unit: PlayUnit): Play[] {
-  return unit === 'offense' ? OFFENSIVE_PLAYS : DEFENSIVE_PLAYS;
+  return unit === 'offense' ? requireCatalog(_offensivePlays) : requireCatalog(_defensivePlays);
+}
+
+export function allPlays(): Play[] {
+  return requireCatalog(_allPlays);
 }
 
 // Coerce arbitrary input into exactly 9 valid play IDs of the given unit,
@@ -225,8 +201,9 @@ export function defaultLoadout(unit: PlayUnit): string[] {
 
 export function categoryCounts(unit: PlayUnit, playIds: string[]): Record<string, number> {
   const counts: Record<string, number> = {};
+  const byId = requireCatalog(_playById);
   for (const id of playIds) {
-    const p = PLAY_BY_ID.get(id);
+    const p = byId.get(id);
     if (!p || p.unit !== unit) continue;
     counts[p.category] = (counts[p.category] ?? 0) + 1;
   }

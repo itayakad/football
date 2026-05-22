@@ -2,7 +2,7 @@ import {
   MeResponse, DashboardResponse, MatchPreviewResponse, SimulateResponse, Gameplan,
   LeagueStandingsResponse, RosterResponse, HistoryResponse,
   OffseasonResponse, CoachMarketResponse, PlayerFreeAgentResponse,
-  OffensivePhilosophy,
+  OffensivePhilosophy, PlayTemplate,
   SchemeUnit, TeamScheme,
 } from './types';
 
@@ -60,8 +60,11 @@ export const api = {
       body: JSON.stringify({ offensivePhilosophy }),
     }),
 
+  plays: () =>
+    request<{ plays: PlayTemplate[] }>('/api/plays'),
+
   schemes: (teamId: string, unit?: SchemeUnit) =>
-    request<{ schemes: TeamScheme[] }>(`/api/team/${teamId}/schemes${unit ? `?unit=${unit}` : ''}`),
+    request<{ schemes: TeamScheme[]; playTemplates: PlayTemplate[] }>(`/api/team/${teamId}/schemes${unit ? `?unit=${unit}` : ''}`),
 
   createScheme: (teamId: string, unit: SchemeUnit, name: string, plays: string[]) =>
     request<TeamScheme>(`/api/team/${teamId}/schemes`, {

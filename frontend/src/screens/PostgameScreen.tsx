@@ -14,7 +14,8 @@ import { SectionLabel } from '../components/SectionLabel';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/types';
 import { lastSim } from '../state/lastSim';
-import { playById } from '../data/playTemplates';
+import { usePlayCatalog } from '../state/playCatalog';
+import { PlayTemplate } from '../api/types';
 
 export const PostgameScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -22,6 +23,7 @@ export const PostgameScreen: React.FC = () => {
   const result     = route.params.result;
   const queryClient = useQueryClient();
   const seasonAdvance = result.seasonAdvance;
+  const { playById } = usePlayCatalog();
   const userIsHome = (() => {
     // We don't have userTeamId on the result, but the gameplans tell us:
     // whichever side has a non-AI gameplan is the user. For now, derive from
@@ -107,13 +109,13 @@ export const PostgameScreen: React.FC = () => {
         <View style={styles.gameplanRow}>
           <Text style={[typography.caption, { width: 80 }]}>{result.homeTeamName}</Text>
           <View style={styles.pillRow}>
-            {gameplanPills(result.homeGameplan.offensivePlays, result.homeGameplan.defensivePlays)}
+            {gameplanPills(result.homeGameplan.offensivePlays, result.homeGameplan.defensivePlays, playById)}
           </View>
         </View>
         <View style={styles.gameplanRow}>
           <Text style={[typography.caption, { width: 80 }]}>{result.awayTeamName}</Text>
           <View style={styles.pillRow}>
-            {gameplanPills(result.awayGameplan.offensivePlays, result.awayGameplan.defensivePlays)}
+            {gameplanPills(result.awayGameplan.offensivePlays, result.awayGameplan.defensivePlays, playById)}
           </View>
         </View>
       </Card>
@@ -144,7 +146,11 @@ export const PostgameScreen: React.FC = () => {
   );
 };
 
-function gameplanPills(offensivePlays: string[], defensivePlays: string[]) {
+function gameplanPills(
+  offensivePlays: string[],
+  defensivePlays: string[],
+  playById: (id: string) => PlayTemplate | undefined,
+) {
   return [...offensivePlays, ...defensivePlays].map((id) => {
     const play = playById(id);
     return (

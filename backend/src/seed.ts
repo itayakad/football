@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import { prisma } from './db';
 import { generateRoundRobin } from './simulation/scheduleGenerator';
-import { DEFENSIVE_PLAYS, OFFENSIVE_PLAYS, PlayCategory } from './simulation/playLibrary';
+import type { PlayCategory } from './simulation/playLibrary';
+import { ALL_PLAY_SEED, DEFENSIVE_PLAY_SEED, OFFENSIVE_PLAY_SEED } from './simulation/playSeedData';
 
 // ─── Name Data ────────────────────────────────────────────
 
@@ -167,6 +168,13 @@ export function generateOverall(age: number, tier: number): number {
 // ─── Seed ─────────────────────────────────────────────────
 
 export async function seedWorld(): Promise<void> {
+  // Ensure the play catalog exists — simulate.ts / multiSeason.ts rely on
+  // seedWorld() for a complete world, and the rest of seedWorld assigns
+  // play loadouts that must reference rows in the Play table.
+  if ((await prisma.play.count()) === 0) {
+    await seedPlayCatalog();
+  }
+
   const leagues = await Promise.all(
     LEAGUES.map((l) => prisma.league.create({ data: l }))
   );
@@ -284,22 +292,22 @@ function loadoutByWeights<T extends { id: string; category: PlayCategory }>(
 
 function offensiveLoadoutForStyle(offenseStyle: string): string[] {
   if (offenseStyle === 'PASS_HEAVY') {
-    return loadoutByWeights(OFFENSIVE_PLAYS, [['LONG_PASS', 3], ['MIDDLE_PASS', 3], ['SHORT_PASS', 2], ['RUNNING', 1]]);
+    return loadoutByWeights(OFFENSIVE_PLAY_SEED, [['LONG_PASS', 3], ['MIDDLE_PASS', 3], ['SHORT_PASS', 2], ['RUNNING', 1]]);
   }
   if (offenseStyle === 'RUN_HEAVY') {
-    return loadoutByWeights(OFFENSIVE_PLAYS, [['RUNNING', 5], ['MIDDLE_PASS', 2], ['SHORT_PASS', 1], ['LONG_PASS', 1]]);
+    return loadoutByWeights(OFFENSIVE_PLAY_SEED, [['RUNNING', 5], ['MIDDLE_PASS', 2], ['SHORT_PASS', 1], ['LONG_PASS', 1]]);
   }
-  return loadoutByWeights(OFFENSIVE_PLAYS, [['RUNNING', 3], ['SHORT_PASS', 2], ['MIDDLE_PASS', 2], ['LONG_PASS', 2]]);
+  return loadoutByWeights(OFFENSIVE_PLAY_SEED, [['RUNNING', 3], ['SHORT_PASS', 2], ['MIDDLE_PASS', 2], ['LONG_PASS', 2]]);
 }
 
 function defensiveLoadoutForStyle(defenseStyle: string): string[] {
   if (defenseStyle === 'AGGRESSIVE') {
-    return loadoutByWeights(DEFENSIVE_PLAYS, [['BLITZ', 4], ['ZONE_BLITZ', 3], ['MAN', 1], ['ZONE', 1]]);
+    return loadoutByWeights(DEFENSIVE_PLAY_SEED, [['BLITZ', 4], ['ZONE_BLITZ', 3], ['MAN', 1], ['ZONE', 1]]);
   }
   if (defenseStyle === 'PREVENT') {
-    return loadoutByWeights(DEFENSIVE_PLAYS, [['ZONE', 4], ['MAN', 3], ['ZONE_BLITZ', 1], ['BLITZ', 1]]);
+    return loadoutByWeights(DEFENSIVE_PLAY_SEED, [['ZONE', 4], ['MAN', 3], ['ZONE_BLITZ', 1], ['BLITZ', 1]]);
   }
-  return loadoutByWeights(DEFENSIVE_PLAYS, [['ZONE', 3], ['BLITZ', 2], ['ZONE_BLITZ', 2], ['MAN', 2]]);
+  return loadoutByWeights(DEFENSIVE_PLAY_SEED, [['ZONE', 3], ['BLITZ', 2], ['ZONE_BLITZ', 2], ['MAN', 2]]);
 }
 
 // HC + OC + DC for a team. Coordinator stat1/stat2 semantics:
@@ -374,6 +382,22 @@ export function philosophyForStyle(offenseStyle: string): string {
   return 'WEST_COAST';
 }
 
+export async function seedPlayCatalog() {
+  console.log('🎯 Seeding play catalog...');
+  await prisma.play.deleteMany();
+  await prisma.play.createMany({
+    data: ALL_PLAY_SEED.map((play, index) => ({
+      id: play.id,
+      unit: play.unit,
+      name: play.name,
+      category: play.category,
+      keySlots: play.keySlots as unknown as object,
+      sortOrder: index,
+    })),
+  });
+  console.log(`  ✓ ${ALL_PLAY_SEED.length} plays`);
+}
+
 async function clearAndSeed() {
   await prisma.retirementHistory.deleteMany();
   await prisma.teamSeasonHistory.deleteMany();
@@ -384,6 +408,7 @@ async function clearAndSeed() {
   await prisma.match.deleteMany();
   await prisma.team.deleteMany();
   await prisma.league.deleteMany();
+  await seedPlayCatalog();
   await seedWorld();
 }
 

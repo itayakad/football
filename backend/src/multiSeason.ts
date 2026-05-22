@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { prisma } from './db';
 import { seedWorld } from './seed';
 import { simulateSeason } from './simulation/seasonSimulator';
+import { loadPlayCatalog } from './simulation/playLibrary';
 
 const N_SEASONS = parseInt(process.argv[2] ?? '10', 10);
 
@@ -43,6 +44,7 @@ async function clearDatabase() {
 async function runSeason(seasonNum: number): Promise<SeasonAgg> {
   await clearDatabase();
   await seedWorld();
+  await loadPlayCatalog(prisma);
   const results = await simulateSeason();
 
   // Pull team metadata so we can attach style/tier to each standing row

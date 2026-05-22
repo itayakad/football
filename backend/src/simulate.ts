@@ -3,6 +3,7 @@ import { prisma } from './db';
 import { seedWorld } from './seed';
 import { simulateSeason, LeagueResult, MatchResultRecord } from './simulation/seasonSimulator';
 import { TeamRecord } from './simulation/standings';
+import { loadPlayCatalog } from './simulation/playLibrary';
 
 // ─── Display helpers ──────────────────────────────────────
 
@@ -181,6 +182,7 @@ async function main(): Promise<void> {
   console.log('\n[1/3] Seeding world...');
   await clearDatabase();
   await seedWorld();
+  await loadPlayCatalog(prisma);
 
   console.log('\n[2/3] Simulating 14-week season...');
   const results = await simulateSeason();

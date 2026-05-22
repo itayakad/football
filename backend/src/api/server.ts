@@ -9,10 +9,11 @@ import { TeamMatchProfile } from '../simulation/matchEngine';
 import { simulateSingleMatch } from './simulateOne';
 import { Gameplan, normalizeGameplan } from '../simulation/gameplan';
 import {
-  ALL_PLAYS,
+  allPlays,
   CATEGORY_COLOR,
   CATEGORY_LABEL,
   defaultLoadout,
+  loadPlayCatalog,
   normalizePlayLoadout,
   PlayUnit,
   playById,
@@ -374,6 +375,22 @@ function strictPlayIds(unit: PlayUnit, value: unknown): string[] | null {
   return ids;
 }
 
+// Accepts 0–9 unique valid plays for the given unit. Used when persisting partial
+// playbooks; the strict 9-play check is enforced separately when marking a scheme
+// as the default.
+function loosePlayIds(unit: PlayUnit, value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const ids = value.filter((item): item is string => typeof item === 'string');
+  if (ids.length > 9) return null;
+  const seen = new Set<string>();
+  for (const id of ids) {
+    const play = playById(id);
+    if (!play || play.unit !== unit || seen.has(id)) return null;
+    seen.add(id);
+  }
+  return ids;
+}
+
 function playPayload(play: ReturnType<typeof playById>) {
   if (!play) return null;
   return {
@@ -389,7 +406,20 @@ function playPayload(play: ReturnType<typeof playById>) {
 
 function schemePayload(scheme: { id: string; unit: string; name: string; plays: any; isDefault: boolean }) {
   const unit = normalizeSchemeUnit(scheme.unit) ?? 'offense';
-  const playIds = normalizePlayLoadout(unit, scheme.plays);
+  // Return raw stored plays (0–9) — do NOT pad with library defaults, or empty
+  // schemes will appear pre-filled to the playbook editor.
+  const raw: unknown = scheme.plays;
+  const ids = (Array.isArray(raw) ? raw : []).filter((id: unknown): id is string => typeof id === 'string');
+  const seen = new Set<string>();
+  const playIds: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    const play = playById(id);
+    if (!play || play.unit !== unit) continue;
+    seen.add(id);
+    playIds.push(id);
+    if (playIds.length === 9) break;
+  }
   return {
     id: scheme.id,
     unit,
@@ -601,6 +631,12 @@ app.patch('/api/team/:teamId/philosophy', async (req, res, next) => {
   }
 });
 
+app.get('/api/plays', (_req, res) => {
+  res.json({
+    plays: allPlays().map((play) => playPayload(play)).filter(Boolean),
+  });
+});
+
 app.get('/api/team/:teamId/schemes', async (req, res, next) => {
   try {
     const { teamId } = req.params;
@@ -612,7 +648,7 @@ app.get('/api/team/:teamId/schemes', async (req, res, next) => {
     });
     res.json({
       schemes: schemes.map(schemePayload),
-      playTemplates: (unit ? playsForUnit(unit) : ALL_PLAYS).map((play) => playPayload(play)).filter(Boolean),
+      playTemplates: (unit ? playsForUnit(unit) : allPlays()).map((play) => playPayload(play)).filter(Boolean),
     });
   } catch (e) { next(e); }
 });
@@ -623,8 +659,8 @@ app.post('/api/team/:teamId/schemes', async (req, res, next) => {
     const unit = normalizeSchemeUnit(req.body?.unit);
     const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : null;
     if (!unit || !name) return res.status(400).json({ error: 'unit and name are required' });
-    const plays = strictPlayIds(unit, req.body?.plays);
-    if (!plays) return res.status(400).json({ error: 'Scheme must contain exactly 9 unique valid plays' });
+    const plays = loosePlayIds(unit, req.body?.plays ?? []);
+    if (!plays) return res.status(400).json({ error: 'Scheme plays must be 0–9 unique valid plays for this unit' });
 
     const scheme = await prisma.teamScheme.create({
       data: { teamId, unit, name, plays: plays as any, isDefault: false },
@@ -642,11 +678,19 @@ app.patch('/api/team/:teamId/schemes/:schemeId', async (req, res, next) => {
     const data: { name?: string; plays?: any; isDefault?: boolean } = {};
     if (typeof req.body?.name === 'string' && req.body.name.trim()) data.name = req.body.name.trim();
     if (Array.isArray(req.body?.plays)) {
-      const plays = strictPlayIds(unit, req.body.plays);
-      if (!plays) return res.status(400).json({ error: 'Scheme must contain exactly 9 unique valid plays' });
+      const plays = loosePlayIds(unit, req.body.plays);
+      if (!plays) return res.status(400).json({ error: 'Scheme plays must be 0–9 unique valid plays for this unit' });
       data.plays = plays as any;
     }
     if (typeof req.body?.isDefault === 'boolean') data.isDefault = req.body.isDefault;
+    if (data.isDefault === true) {
+      const finalPlays = Array.isArray(data.plays)
+        ? (data.plays as string[])
+        : normalizePlayLoadout(unit, existing.plays);
+      if (finalPlays.length !== 9) {
+        return res.status(400).json({ error: 'A playbook must contain 9 plays before it can be set active' });
+      }
+    }
     const scheme = data.isDefault === true
       ? await prisma.$transaction(async (tx) => {
           await tx.teamScheme.updateMany({ where: { teamId, unit, id: { not: schemeId } }, data: { isDefault: false } });
@@ -1079,6 +1123,13 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: err.message ?? 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-  console.log(`API listening on http://localhost:${PORT}`);
-});
+loadPlayCatalog(prisma)
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`API listening on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to load play catalog from DB. Did you run `npm run seed`?', err);
+    process.exit(1);
+  });

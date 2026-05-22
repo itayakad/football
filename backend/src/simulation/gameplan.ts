@@ -12,13 +12,18 @@ export interface Gameplan {
   defensivePlays: string[]; // exactly 9 valid defensive play IDs
 }
 
-export const DEFAULT_GAMEPLAN: Gameplan = {
-  offensivePlays: defaultLoadout('offense'),
-  defensivePlays: defaultLoadout('defense'),
-};
+// Lazy because defaultLoadout() reads from the DB-backed play catalog, which
+// isn't populated until loadPlayCatalog() runs at process boot. Top-level
+// evaluation would run before that and throw.
+export function defaultGameplan(): Gameplan {
+  return {
+    offensivePlays: defaultLoadout('offense'),
+    defensivePlays: defaultLoadout('defense'),
+  };
+}
 
 export function normalizeGameplan(raw: unknown): Gameplan {
-  if (!raw || typeof raw !== 'object') return DEFAULT_GAMEPLAN;
+  if (!raw || typeof raw !== 'object') return defaultGameplan();
   const value = raw as Record<string, unknown>;
   return {
     offensivePlays: normalizePlayLoadout('offense', value.offensivePlays),

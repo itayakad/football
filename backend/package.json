@@ -6,6 +6,7 @@
     "simulate": "ts-node src/simulate.ts",
     "sim:multi": "ts-node src/multiSeason.ts",
     "seed": "ts-node src/seed.ts",
+    "seed:plays": "ts-node src/seedPlays.ts",
     "expand-leagues": "ts-node src/expandLeagues.ts",
     "api": "ts-node src/api/server.ts",
     "api:dev": "nodemon --exec ts-node src/api/server.ts",

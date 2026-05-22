@@ -193,7 +193,7 @@ export const TeamScreen: React.FC = () => {
             onPress={() => navigation.navigate('ChooseScheme', { unit })}
             style={({ pressed }) => [styles.schemeButton, pressed && styles.pressed]}
           >
-            <Text style={styles.schemeButtonText}>Change {unit === 'offense' ? 'Offensive' : 'Defensive'} Scheme</Text>
+            <Text style={styles.schemeButtonText}>Change {unit === 'offense' ? 'Offensive' : 'Defensive'} Playbook</Text>
           </Pressable>
 
           {unit === 'offense' ? (

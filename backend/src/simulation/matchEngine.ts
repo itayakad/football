@@ -1,19 +1,18 @@
 import {
   defensivePlayById,
   defensiveMatchupMod,
-  DEFENSIVE_PLAYS,
   DefensiveCategory,
   DefensivePlay,
   MATCHUP_MULTIPLIER,
   offensiveMatchupMod,
-  OFFENSIVE_PLAYS,
+  offensivePlayById,
   OffensiveCategory,
   OffensivePlay,
   Play,
   PlayerSlot,
   playById,
 } from './playLibrary';
-import { Gameplan, DEFAULT_GAMEPLAN, normalizeGameplan } from './gameplan';
+import { Gameplan, defaultGameplan, normalizeGameplan } from './gameplan';
 
 // ── Public types ──────────────────────────────────────────
 
@@ -229,10 +228,10 @@ interface TeamCtx {
 function buildContext(team: TeamMatchProfile, gameplan: Gameplan, side: 'home' | 'away'): TeamCtx {
   const slots = buildSlotMap(team.players);
   const offense = gameplan.offensivePlays
-    .map((id) => OFFENSIVE_PLAYS.find((p) => p.id === id))
+    .map((id) => offensivePlayById(id))
     .filter((p): p is OffensivePlay => !!p);
   const defense = gameplan.defensivePlays
-    .map((id) => DEFENSIVE_PLAYS.find((p) => p.id === id))
+    .map((id) => defensivePlayById(id))
     .filter((p): p is DefensivePlay => !!p);
 
   const offenseCategoryCounts: Record<OffensiveCategory, number> = { RUNNING: 0, SHORT_PASS: 0, MIDDLE_PASS: 0, LONG_PASS: 0 };
@@ -596,8 +595,8 @@ export function simulateMatch(
   home: TeamMatchProfile,
   away: TeamMatchProfile,
   _week: number = 1,
-  homeGameplan: Gameplan = DEFAULT_GAMEPLAN,
-  awayGameplan: Gameplan = DEFAULT_GAMEPLAN,
+  homeGameplan: Gameplan = defaultGameplan(),
+  awayGameplan: Gameplan = defaultGameplan(),
 ): MatchSimResult {
   const homeGP = normalizeGameplan(homeGameplan);
   const awayGP = normalizeGameplan(awayGameplan);

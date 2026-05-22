@@ -1,4 +1,4 @@
-import { Gameplan, DEFAULT_GAMEPLAN, normalizeGameplan } from './gameplan';
+import { Gameplan, defaultGameplan, normalizeGameplan } from './gameplan';
 import { categoryCounts, CATEGORY_LABEL, OffensiveCategory, DefensiveCategory } from './playLibrary';
 
 // Coaches no longer pick weekly "concepts/counters". The team's identity IS its
@@ -22,9 +22,10 @@ export interface CoachRecommendation {
 }
 
 export function chooseAIGameplan(team: CoachableTeam): Gameplan {
+  const defaults = defaultGameplan();
   return normalizeGameplan({
-    offensivePlays: team.offensivePlays ?? DEFAULT_GAMEPLAN.offensivePlays,
-    defensivePlays: team.defensivePlays ?? DEFAULT_GAMEPLAN.defensivePlays,
+    offensivePlays: team.offensivePlays ?? defaults.offensivePlays,
+    defensivePlays: team.defensivePlays ?? defaults.defensivePlays,
   });
 }
 
