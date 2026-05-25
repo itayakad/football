@@ -16,6 +16,7 @@ import { DefensiveIdentity, OffensiveIdentity, PlayerFreeAgentResponse, RosterPl
 import { ContractValue } from '../components/ContractValue';
 import { ProfileSheet } from '../components/ProfileSheet';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { useUserTeamId } from '../state/userTeam';
 import { colors, radius, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/types';
@@ -133,41 +134,20 @@ export const TeamScreen: React.FC = () => {
 
   return (
     <ScreenContainer scroll={false} contentStyle={styles.screenContent}>
-      <View style={styles.identityBlock}>
-        <View style={styles.identityTopRow}>
-          <View style={styles.identityLabelGroup}>
-            <Text style={styles.identityHeaderLabel}>Team Identity</Text>
-            <View style={styles.identityIconRow}>
-              <View style={styles.identityIconCircle}>
-                <Ionicons
-                  name={offensiveIdentityIcon(data.team.identity.offense)}
-                  size={14}
-                  color={offensiveIdentityColor(data.team.identity.offense)}
-                />
-              </View>
-              <View style={styles.identityIconCircle}>
-                <Ionicons
-                  name={defensiveIdentityIcon(data.team.identity.defense)}
-                  size={14}
-                  color={defensiveIdentityColor(data.team.identity.defense)}
-                />
-              </View>
-            </View>
-          </View>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Back to home"
-            onPress={() => navigation.navigate('Home')}
-            style={({ pressed }) => [styles.homeButton, pressed && styles.homeButtonPressed]}
-          >
-            <Ionicons name="home-outline" size={16} color={colors.text.primary} />
-            <Text style={styles.homeButtonText}>Home</Text>
-          </Pressable>
-        </View>
-        <View style={styles.identityValue}>
-          <Text style={styles.identityArchetype} numberOfLines={1}>{teamArchetypeLabel(data.team.identity)}</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        label="Team Identity"
+        title={teamArchetypeLabel(data.team.identity)}
+        icons={[
+          {
+            name:  offensiveIdentityIcon(data.team.identity.offense),
+            color: offensiveIdentityColor(data.team.identity.offense),
+          },
+          {
+            name:  defensiveIdentityIcon(data.team.identity.defense),
+            color: defensiveIdentityColor(data.team.identity.defense),
+          },
+        ]}
+      />
 
       {data.team.coaches.length > 0 && (
         <View>
@@ -988,73 +968,6 @@ const styles = StyleSheet.create({
     ...typography.label,
     color: colors.text.primary,
     fontWeight: '800',
-  },
-  identityBlock: {
-    gap: spacing.xs,
-  },
-  identityTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.sm,
-  },
-  identityLabelGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 1,
-    gap: spacing.xs,
-  },
-  identityHeaderLabel: {
-    ...typography.heading,
-    color: colors.text.secondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  homeButton: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.sm,
-    backgroundColor: colors.bg.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  homeButtonPressed: {
-    backgroundColor: colors.bg.elevated,
-  },
-  homeButtonText: {
-    ...typography.label,
-    color: colors.text.primary,
-  },
-  identityValue: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    minWidth: 0,
-  },
-  identityArchetype: {
-    ...typography.display,
-    color: colors.text.primary,
-    flexShrink: 1,
-    minWidth: 0,
-  },
-  identityIconRow: {
-    flexDirection: 'row',
-    gap: 4,
-    flexShrink: 0,
-  },
-  identityIconCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.bg.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
   philosophyGrid: {
     flexDirection: 'row',

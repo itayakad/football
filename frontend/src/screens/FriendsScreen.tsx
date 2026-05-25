@@ -1,17 +1,15 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionLabel } from '../components/SectionLabel';
 import { colors, spacing, typography } from '../theme';
 
 export const FriendsScreen: React.FC = () => (
   <ScreenContainer>
-    <View>
-      <Text style={typography.label}>Social</Text>
-      <Text style={[typography.display, styles.title]}>Friends</Text>
-    </View>
+    <ScreenHeader label="Social" title="Friends" />
 
     <Card>
       <SectionLabel>Coming Soon</SectionLabel>
@@ -26,9 +24,6 @@ export const FriendsScreen: React.FC = () => (
 );
 
 const styles = StyleSheet.create({
-  title: {
-    marginTop: spacing.xs,
-  },
   note: {
     color:     colors.text.secondary,
     marginTop: spacing.sm,

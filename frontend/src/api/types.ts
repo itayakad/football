@@ -176,6 +176,27 @@ export interface MatchPreviewResponse {
     offenseRating: number;
     defenseRating: number;
     groups:        PositionGroups;
+    topOffense: Array<{
+      id:       string;
+      name:     string;
+      position: string;
+      overall:  number;
+      age:      number;
+    }>;
+    topDefense: Array<{
+      id:       string;
+      name:     string;
+      position: string;
+      overall:  number;
+      age:      number;
+    }>;
+    coaches: Array<{
+      id:        string;
+      name:      string;
+      position:  CoachPosition;
+      archetype: string;
+      overall:   number;
+    }>;
   };
   recommendation: CoachRecommendation;
   schemes: TeamScheme[];

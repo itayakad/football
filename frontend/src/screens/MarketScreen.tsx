@@ -7,6 +7,7 @@ import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { ContractValue, formatMoney } from '../components/ContractValue';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionLabel } from '../components/SectionLabel';
 import { useUserTeamId } from '../state/userTeam';
 import { colors, radius, spacing, typography } from '../theme';
@@ -48,10 +49,7 @@ export const MarketScreen: React.FC = () => {
 
   return (
     <ScreenContainer>
-      <View>
-        <Text style={typography.label}>Free Agency</Text>
-        <Text style={[typography.display, styles.title]}>Staff Market</Text>
-      </View>
+      <ScreenHeader label="Free Agency" title="Staff Market" />
 
       <Card>
         <View style={styles.financeRow}>
@@ -105,9 +103,6 @@ export const MarketScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  title: {
-    marginTop: spacing.xs,
-  },
   financeRow: {
     flexDirection: 'row',
     gap: spacing.sm,

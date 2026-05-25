@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 
 import { ScreenContainer } from '../components/ScreenContainer';
-import { Card } from '../components/Card';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { Button } from '../components/Button';
-import { Pill, pillColor, pillLabel } from '../components/Pill';
-import { SectionLabel } from '../components/SectionLabel';
-import { FormDots } from '../components/FormDots';
 import { api } from '../api/client';
 import { useUserTeamId } from '../state/userTeam';
 import { lastSim } from '../state/lastSim';
-import { colors, spacing, typography, radius } from '../theme';
-import { SchemeUnit, TeamScheme } from '../api/types';
+import { colors, radius, spacing, typography } from '../theme';
+import { DefensiveIdentity, MatchPreviewResponse, OffensiveIdentity, SchemeUnit, TeamScheme } from '../api/types';
 import { RootStackParamList } from '../navigation/types';
+import { teamArchetypeLabel } from '../utils/teamArchetype';
+
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
+type Opponent = MatchPreviewResponse['opponent'];
+type OpponentPlayer = Opponent['topOffense'][number];
+type OpponentCoach = Opponent['coaches'][number];
 
 export const MatchPreviewScreen: React.FC = () => {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
@@ -46,82 +50,107 @@ export const MatchPreviewScreen: React.FC = () => {
   });
 
   if (!userTeamId || isLoading) {
-    return <ScreenContainer><ActivityIndicator color={colors.accent.primary} style={{ marginTop: spacing.xxxl }} /></ScreenContainer>;
+    return (
+      <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
+        <ActivityIndicator color={colors.accent.primary} style={{ marginTop: spacing.xxxl }} />
+      </ScreenContainer>
+    );
   }
   if (error || !data || !offenseSchemeId || !defenseSchemeId) {
-    return <ScreenContainer><Text style={typography.body}>Failed to load match preview.</Text></ScreenContainer>;
+    return (
+      <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
+        <Text style={typography.body}>Failed to load match preview.</Text>
+      </ScreenContainer>
+    );
   }
 
   const { opponent, week, isHome } = data;
-  const myTeam = data.myTeam;
   const offenseSchemes = data.schemes.filter((scheme) => scheme.unit === 'offense');
   const defenseSchemes = data.schemes.filter((scheme) => scheme.unit === 'defense');
+  const offenseScheme = offenseSchemes.find((scheme) => scheme.id === offenseSchemeId) ?? null;
+  const defenseScheme = defenseSchemes.find((scheme) => scheme.id === defenseSchemeId) ?? null;
 
   return (
-    <ScreenContainer>
-      {/* ── Header: Matchup ─────────────────────────────── */}
-      <View>
-        <Text style={typography.label}>Week {week} · {isHome ? 'Home' : 'Away'}</Text>
-        <View style={styles.matchupRow}>
-          <View style={styles.teamSlot}>
-            <Text style={typography.heading}>{myTeam.name}</Text>
-            <Text style={typography.caption}>OFF {myTeam.offenseRating} · DEF {myTeam.defenseRating}</Text>
-            {data.myForm.lastResults.length > 0 && (
-              <View style={{ marginTop: spacing.xs }}>
-                <FormDots results={data.myForm.lastResults} streak={data.myForm.streak} />
-              </View>
-            )}
+    <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
+      <ScreenHeader
+        label={`Week ${week} · ${isHome ? 'Home' : 'Away'}`}
+        title={`${isHome ? 'vs' : '@'} ${opponent.name}`}
+      />
+
+      <View style={styles.opponentCard}>
+        <View style={styles.opponentTopRow}>
+          <View style={styles.opponentIdentityIcons}>
+            <View style={styles.identityIconCircle}>
+              <Ionicons
+                name={offensiveIdentityIcon(opponent.identity.offense)}
+                size={14}
+                color={offensiveIdentityColor(opponent.identity.offense)}
+              />
+            </View>
+            <View style={styles.identityIconCircle}>
+              <Ionicons
+                name={defensiveIdentityIcon(opponent.identity.defense)}
+                size={14}
+                color={defensiveIdentityColor(opponent.identity.defense)}
+              />
+            </View>
           </View>
-          <Text style={[typography.title, { color: colors.text.muted }]}>vs</Text>
-          <View style={styles.teamSlot}>
-            <Text style={typography.heading}>{opponent.name}</Text>
-            <Text style={typography.caption}>OFF {opponent.offenseRating} · DEF {opponent.defenseRating}</Text>
-            {data.oppForm.lastResults.length > 0 && (
-              <View style={{ marginTop: spacing.xs }}>
-                <FormDots results={data.oppForm.lastResults} streak={data.oppForm.streak} />
-              </View>
-            )}
+          <Text style={styles.opponentArchetype} numberOfLines={1}>
+            {teamArchetypeLabel(opponent.identity)}
+          </Text>
+          <View style={styles.opponentRatings}>
+            <RatingBlock label="OFF" value={opponent.offenseRating} />
+            <RatingBlock label="DEF" value={opponent.defenseRating} />
+          </View>
+        </View>
+
+        <View style={styles.unitBlock}>
+          <Text style={styles.unitHeader}>Top Offense</Text>
+          <View style={styles.playerRow}>
+            {opponent.topOffense.map((player) => (
+              <PlayerChip key={player.id} player={player} />
+            ))}
+            {opponent.topOffense.length === 0 && <EmptySlot />}
+          </View>
+        </View>
+
+        <View style={styles.unitBlock}>
+          <Text style={styles.unitHeader}>Top Defense</Text>
+          <View style={styles.playerRow}>
+            {opponent.topDefense.map((player) => (
+              <PlayerChip key={player.id} player={player} />
+            ))}
+            {opponent.topDefense.length === 0 && <EmptySlot />}
+          </View>
+        </View>
+
+        <View style={styles.unitBlock}>
+          <Text style={styles.unitHeader}>Coaching Staff</Text>
+          <View style={styles.coachRow}>
+            {opponent.coaches.map((coach) => (
+              <CoachChip key={coach.id} coach={coach} />
+            ))}
+            {opponent.coaches.length === 0 && <EmptySlot />}
           </View>
         </View>
       </View>
 
-      {/* ── Opponent Breakdown ──────────────────────────── */}
-      <Card>
-        <SectionLabel>Opponent Breakdown</SectionLabel>
-        <View style={styles.identityRow}>
-          <Pill label={pillLabel(opponent.identity.offense)} color={pillColor(opponent.identity.offense)} />
-          <Pill label={pillLabel(opponent.offensivePhilosophy)} color={pillColor(opponent.offensivePhilosophy)} />
-          <Pill label={pillLabel(opponent.identity.defense)} color={pillColor(opponent.identity.defense)} />
-        </View>
-
-        <View style={styles.groupGrid}>
-          <GroupStat label="QB"        value={opponent.groups.qb} />
-          <GroupStat label="Skill"     value={opponent.groups.skillPositions} />
-          <GroupStat label="O-Line"    value={opponent.groups.oLine} />
-          <GroupStat label="Front 7"   value={opponent.groups.frontSeven} />
-          <GroupStat label="Secondary" value={opponent.groups.secondary} />
-        </View>
-      </Card>
-
-      <Card>
-        <SectionLabel>Weekly Schemes</SectionLabel>
-        <SchemePicker
-          label="Offense"
+      <View style={styles.schemeBlock}>
+        <SchemeDropdown
+          label="Offense Scheme"
           unit="offense"
           schemes={offenseSchemes}
-          value={offenseSchemeId}
+          selected={offenseScheme}
           onChange={setOffenseSchemeId}
-          onEdit={() => navigation.navigate('ChooseScheme', { unit: 'offense', mode: 'pregame', matchId })}
         />
-        <SchemePicker
-          label="Defense"
+        <SchemeDropdown
+          label="Defense Scheme"
           unit="defense"
           schemes={defenseSchemes}
-          value={defenseSchemeId}
+          selected={defenseScheme}
           onChange={setDefenseSchemeId}
-          onEdit={() => navigation.navigate('ChooseScheme', { unit: 'defense', mode: 'pregame', matchId })}
         />
-      </Card>
+      </View>
 
       <Button
         label={simulateMutation.isPending ? 'Simulating…' : 'Simulate Game →'}
@@ -134,63 +163,111 @@ export const MatchPreviewScreen: React.FC = () => {
 
 // ─── Sub-components ─────────────────────────────────────
 
-const GroupStat: React.FC<{ label: string; value: number }> = ({ label, value }) => {
-  const tier = value >= 78 ? 'strong' : value >= 65 ? 'avg' : 'weak';
-  const color = tier === 'strong' ? colors.success : tier === 'avg' ? colors.text.secondary : colors.danger;
+const RatingBlock: React.FC<{ label: string; value: number }> = ({ label, value }) => (
+  <View style={styles.ratingBlock}>
+    <Text style={styles.ratingLabel}>{label}</Text>
+    <Text style={styles.ratingValue}>{value}</Text>
+  </View>
+);
+
+const PlayerChip: React.FC<{ player: OpponentPlayer }> = ({ player }) => {
+  const lastName = player.name.split(' ').slice(1).join(' ') || player.name;
   return (
-    <View style={styles.groupCell}>
-      <Text style={[typography.caption, { fontSize: 11 }]}>{label}</Text>
-      <Text style={[typography.heading, { color }]}>{Math.round(value)}</Text>
+    <View style={styles.chip}>
+      <View style={styles.chipTopRow}>
+        <Text style={styles.chipPosition}>{player.position}</Text>
+        <Text style={styles.chipOverall}>{player.overall}</Text>
+      </View>
+      <View style={styles.chipAvatar}>
+        <Text style={styles.chipAvatarText}>{initials(player.name)}</Text>
+      </View>
+      <Text style={styles.chipName} numberOfLines={1}>{lastName}</Text>
     </View>
   );
 };
 
-const ReasonRow: React.FC<{ label: string; pick: string; reason: string }> = ({ label, pick, reason }) => (
-  <View style={styles.reasonRow}>
-    <View style={styles.reasonLabel}>
-      <Text style={typography.label}>{label}</Text>
-      <Text style={[typography.heading, { color: colors.accent.primary }]}>{pillLabel(pick)}</Text>
+const CoachChip: React.FC<{ coach: OpponentCoach }> = ({ coach }) => {
+  const lastName = coach.name.split(' ').slice(1).join(' ') || coach.name;
+  return (
+    <View style={styles.chip}>
+      <View style={styles.chipTopRow}>
+        <Text style={styles.chipPosition}>{coach.position}</Text>
+        <Text style={styles.chipOverall}>{coach.overall}</Text>
+      </View>
+      <View style={styles.chipAvatar}>
+        <Text style={styles.chipAvatarText}>{initials(coach.name)}</Text>
+      </View>
+      <Text style={styles.chipName} numberOfLines={1}>{lastName}</Text>
     </View>
-    <Text style={[typography.caption, { flex: 1 }]}>{reason}</Text>
-  </View>
+  );
+};
+
+const EmptySlot: React.FC = () => (
+  <Text style={styles.emptyText}>—</Text>
 );
 
-const SchemePicker: React.FC<{
-  label: string;
-  unit: SchemeUnit;
-  schemes: TeamScheme[];
-  value: string | null;
+const SchemeDropdown: React.FC<{
+  label:    string;
+  unit:     SchemeUnit;
+  schemes:  TeamScheme[];
+  selected: TeamScheme | null;
   onChange: (id: string) => void;
-  onEdit: () => void;
-}> = ({ label, schemes, value, onChange, onEdit }) => (
-  <View style={styles.selectorRow}>
-    <View style={styles.schemePickerHeader}>
-      <Text style={[typography.caption, { marginBottom: spacing.sm }]}>{label}</Text>
-      <Pressable onPress={onEdit}>
-        <Text style={styles.editSchemeText}>Edit</Text>
-      </Pressable>
-    </View>
-    <View style={styles.optionsGrid}>
-      {schemes.map((scheme) => {
-        const selected = scheme.id === value;
-        return (
-          <Pressable
-            key={scheme.id}
-            onPress={() => onChange(scheme.id)}
-            style={[styles.option, selected && styles.optionSelected]}
-          >
-            <Text style={[styles.optionText, selected && { color: colors.text.primary, fontWeight: '700' }]}>
-              {scheme.name}
-            </Text>
-            <Text style={[styles.schemeCount, selected && { color: colors.text.primary }]}>
-              {categorySummary(scheme)}
-            </Text>
+}> = ({ label, schemes, selected, onChange }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <View style={styles.dropdown}>
+        <Text style={styles.dropdownLabel}>{label}</Text>
+        <Pressable
+          onPress={() => setOpen(true)}
+          style={({ pressed }) => [styles.dropdownButton, pressed && styles.dropdownButtonPressed]}
+        >
+          <Text style={styles.dropdownValue} numberOfLines={1}>
+            {selected?.name ?? 'Select a scheme'}
+          </Text>
+          <Ionicons name="chevron-down" size={18} color={colors.text.secondary} />
+        </Pressable>
+      </View>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setOpen(false)}>
+          <Pressable style={styles.modalSheet} onPress={() => {}}>
+            <Text style={styles.modalTitle}>{label}</Text>
+            {schemes.map((scheme) => {
+              const isSelected = scheme.id === selected?.id;
+              return (
+                <Pressable
+                  key={scheme.id}
+                  onPress={() => {
+                    onChange(scheme.id);
+                    setOpen(false);
+                  }}
+                  style={({ pressed }) => [
+                    styles.modalOption,
+                    isSelected && styles.modalOptionSelected,
+                    pressed && styles.modalOptionPressed,
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.modalOptionName, isSelected && styles.modalOptionNameSelected]} numberOfLines={1}>
+                      {scheme.name}
+                    </Text>
+                    <Text style={styles.modalOptionMeta} numberOfLines={1}>
+                      {categorySummary(scheme)}
+                    </Text>
+                  </View>
+                  {isSelected && (
+                    <Ionicons name="checkmark-circle" size={20} color={colors.accent.primary} />
+                  )}
+                </Pressable>
+              );
+            })}
           </Pressable>
-        );
-      })}
-    </View>
-  </View>
-);
+        </Pressable>
+      </Modal>
+    </>
+  );
+};
 
 function categorySummary(scheme: TeamScheme): string {
   const counts = new Map<string, number>();
@@ -200,167 +277,253 @@ function categorySummary(scheme: TeamScheme): string {
   return Array.from(counts.entries()).map(([label, count]) => `${count} ${label}`).join(' · ');
 }
 
-const SelectorRow: React.FC<{
-  label:       string;
-  options:     string[];
-  value:       string;
-  recommended: string;
-  onChange:    (v: string) => void;
-}> = ({ label, options, value, recommended, onChange }) => (
-  <View style={styles.selectorRow}>
-    <Text style={[typography.caption, { marginBottom: spacing.sm }]}>{label}</Text>
-    <View style={styles.optionsGrid}>
-      {options.map((opt) => {
-        const selected = opt === value;
-        const isRec    = opt === recommended;
-        return (
-          <Pressable
-            key={opt}
-            onPress={() => onChange(opt)}
-            style={[
-              styles.option,
-              selected && styles.optionSelected,
-            ]}
-          >
-            <Text style={[
-              styles.optionText,
-              selected && { color: colors.text.primary, fontWeight: '700' },
-            ]}>
-              {pillLabel(opt)}
-            </Text>
-            {isRec && !selected && (
-              <View style={styles.recDot} />
-            )}
-          </Pressable>
-        );
-      })}
-    </View>
-  </View>
-);
+function initials(name: string): string {
+  return name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
+}
 
-const MultiSelectorRow: React.FC<{
-  label: string;
-  options: string[];
-  value: [string, string, string];
-  recommended: [string, string, string];
-  onChange: (v: [string, string, string]) => void;
-}> = ({ label, options, value, recommended, onChange }) => {
-  const toggle = (option: string) => {
-    if (value.includes(option)) {
-      if (value.length <= 3) return;
-      onChange(value.filter((item) => item !== option).slice(0, 3) as [string, string, string]);
-      return;
-    }
-    onChange([option, value[0], value[1]]);
+function offensiveIdentityIcon(identity: OffensiveIdentity): IoniconName {
+  const icons: Record<OffensiveIdentity, IoniconName> = {
+    VERTICAL:   'rocket-outline',
+    RUN_HEAVY:  'footsteps-outline',
+    PASS_HEAVY: 'send-outline',
+    BALANCED:   'options-outline',
   };
+  return icons[identity];
+}
 
-  return (
-    <View style={styles.selectorRow}>
-      <Text style={[typography.caption, { marginBottom: spacing.sm }]}>{label} · pick 3</Text>
-      <View style={styles.optionsGrid}>
-        {options.map((opt) => {
-          const rank = value.indexOf(opt);
-          const selected = rank >= 0;
-          const isRec = recommended.includes(opt);
-          return (
-            <Pressable
-              key={opt}
-              onPress={() => toggle(opt)}
-              style={[
-                styles.option,
-                selected && styles.optionSelected,
-              ]}
-            >
-              <Text style={[
-                styles.optionText,
-                selected && { color: colors.text.primary, fontWeight: '700' },
-              ]}>
-                {selected ? `${rank + 1}. ` : ''}{pillLabel(opt)}
-              </Text>
-              {isRec && !selected && (
-                <View style={styles.recDot} />
-              )}
-            </Pressable>
-          );
-        })}
-      </View>
-    </View>
-  );
-};
+function defensiveIdentityIcon(identity: DefensiveIdentity): IoniconName {
+  const icons: Record<DefensiveIdentity, IoniconName> = {
+    PRESSURE:   'flash-outline',
+    MAN_HEAVY:  'person-outline',
+    ZONE_HEAVY: 'grid-outline',
+    BALANCED:   'shield-checkmark-outline',
+  };
+  return icons[identity];
+}
+
+function offensiveIdentityColor(identity: OffensiveIdentity): string {
+  if (identity === 'VERTICAL' || identity === 'PASS_HEAVY') return colors.identity.pass;
+  if (identity === 'RUN_HEAVY') return colors.identity.run;
+  return colors.identity.bal;
+}
+
+function defensiveIdentityColor(identity: DefensiveIdentity): string {
+  if (identity === 'PRESSURE') return colors.identity.agg;
+  if (identity === 'MAN_HEAVY') return colors.identity.man;
+  if (identity === 'ZONE_HEAVY') return colors.identity.zone;
+  return colors.identity.bal;
+}
 
 const styles = StyleSheet.create({
-  matchupRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    gap:            spacing.lg,
-    marginTop:      spacing.sm,
-  },
-  teamSlot:    { flex: 1 },
-  identityRow: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap', marginTop: spacing.xs },
-  groupGrid: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
+  fixedContent: {
+    flex:          1,
+    paddingTop:    spacing.sm,
+    paddingBottom: spacing.sm,
     gap:           spacing.md,
-    marginTop:     spacing.md,
   },
-  groupCell: {
-    width:           '30%',
-    paddingVertical: spacing.sm,
+  opponentCard: {
+    flex:            1,
+    minHeight:       0,
+    backgroundColor: colors.bg.elevated,
+    borderRadius:    radius.lg,
+    padding:         spacing.md,
+    borderWidth:     1,
+    borderColor:     colors.border,
+    gap:             spacing.sm,
   },
-  reasonRow: {
+  opponentTopRow: {
     flexDirection: 'row',
-    gap:           spacing.md,
-    marginTop:     spacing.md,
-    alignItems:    'flex-start',
-  },
-  reasonLabel: {
-    width: 110,
-  },
-  selectorRow: {
-    marginTop: spacing.md,
-  },
-  schemePickerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  editSchemeText: {
-    ...typography.label,
-    color: colors.accent.primary,
-  },
-  optionsGrid: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
+    alignItems:    'center',
     gap:           spacing.sm,
   },
-  option: {
-    paddingVertical:   spacing.md,
-    paddingHorizontal: spacing.lg,
-    backgroundColor:   colors.bg.surface,
-    borderRadius:      radius.md,
-    flexDirection:     'row',
-    alignItems:        'center',
-    gap:               spacing.xs,
+  opponentIdentityIcons: {
+    flexDirection: 'row',
+    gap:           4,
   },
-  optionSelected: {
-    backgroundColor: colors.accent.primary,
+  identityIconCircle: {
+    width:           24,
+    height:          24,
+    borderRadius:    12,
+    alignItems:      'center',
+    justifyContent:  'center',
+    backgroundColor: colors.bg.surface,
+    borderWidth:     1,
+    borderColor:     colors.border,
   },
-  schemeCount: {
+  opponentArchetype: {
+    ...typography.label,
+    color:      colors.text.primary,
+    flex:       1,
+    flexShrink: 1,
+  },
+  opponentRatings: {
+    flexDirection: 'row',
+    gap:           spacing.xs,
+  },
+  ratingBlock: {
+    minWidth:        48,
+    alignItems:      'center',
+    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    borderRadius:    radius.sm,
+    backgroundColor: colors.bg.surface,
+    borderWidth:     1,
+    borderColor:     colors.border,
+  },
+  ratingLabel: {
+    ...typography.label,
+    fontSize: 9,
+    color:    colors.text.muted,
+  },
+  ratingValue: {
+    ...typography.heading,
+    fontSize: 16,
+    color:    colors.accent.primary,
+  },
+  unitBlock: {
+    gap: spacing.xs,
+  },
+  unitHeader: {
+    ...typography.label,
+    color:         colors.text.secondary,
+    letterSpacing: 0.8,
+  },
+  playerRow: {
+    flexDirection: 'row',
+    gap:           spacing.sm,
+  },
+  coachRow: {
+    flexDirection: 'row',
+    gap:           spacing.sm,
+  },
+  chip: {
+    flex:            1,
+    minHeight:       96,
+    borderRadius:    radius.md,
+    padding:         spacing.sm,
+    backgroundColor: colors.bg.surface,
+    borderWidth:     1,
+    borderColor:     colors.border,
+    alignItems:      'center',
+    gap:             4,
+  },
+  chipTopRow: {
+    width:           '100%',
+    flexDirection:   'row',
+    justifyContent:  'space-between',
+    alignItems:      'center',
+  },
+  chipPosition: {
+    ...typography.label,
+    fontSize: 10,
+    color:    colors.text.secondary,
+  },
+  chipOverall: {
+    color:      colors.accent.primary,
+    fontSize:   14,
+    fontWeight: '800',
+  },
+  chipAvatar: {
+    width:           32,
+    height:          32,
+    borderRadius:    16,
+    backgroundColor: colors.bg.elevated,
+    alignItems:      'center',
+    justifyContent:  'center',
+    borderWidth:     1,
+    borderColor:     colors.border,
+  },
+  chipAvatarText: {
+    color:      colors.text.secondary,
+    fontSize:   11,
+    fontWeight: '800',
+  },
+  chipName: {
+    color:      colors.text.primary,
+    fontSize:   11,
+    fontWeight: '700',
+    width:      '100%',
+    textAlign:  'center',
+  },
+  emptyText: {
     ...typography.caption,
     color: colors.text.muted,
-    fontSize: 10,
   },
-  optionText: {
-    ...typography.caption,
+  schemeBlock: {
+    gap: spacing.sm,
+  },
+  dropdown: {
+    gap: 4,
+  },
+  dropdownLabel: {
+    ...typography.label,
     color: colors.text.secondary,
-    fontSize: 13,
-    fontWeight: '600',
   },
-  recDot: {
-    width:  6,
-    height: 6,
-    borderRadius: 999,
-    backgroundColor: colors.accent.primary,
-    marginLeft: spacing.xs,
+  dropdownButton: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingVertical:   spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius:      radius.md,
+    backgroundColor:   colors.bg.elevated,
+    borderWidth:       1,
+    borderColor:       colors.border,
+    minHeight:         42,
+  },
+  dropdownButtonPressed: {
+    backgroundColor: colors.bg.surface,
+  },
+  dropdownValue: {
+    ...typography.body,
+    flex:       1,
+    fontWeight: '700',
+    color:      colors.text.primary,
+  },
+  modalBackdrop: {
+    flex:            1,
+    backgroundColor: colors.bg.overlay,
+    justifyContent:  'center',
+    paddingHorizontal: spacing.xl,
+  },
+  modalSheet: {
+    backgroundColor: colors.bg.elevated,
+    borderRadius:    radius.lg,
+    padding:         spacing.lg,
+    gap:             spacing.sm,
+    borderWidth:     1,
+    borderColor:     colors.border,
+  },
+  modalTitle: {
+    ...typography.label,
+    color:        colors.text.secondary,
+    marginBottom: spacing.xs,
+  },
+  modalOption: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               spacing.sm,
+    padding:           spacing.md,
+    borderRadius:      radius.md,
+    backgroundColor:   colors.bg.surface,
+    borderWidth:       1,
+    borderColor:       colors.border,
+  },
+  modalOptionSelected: {
+    borderColor:     colors.accent.primary,
+  },
+  modalOptionPressed: {
+    backgroundColor: colors.bg.elevated,
+  },
+  modalOptionName: {
+    ...typography.body,
+    fontWeight: '700',
+    color:      colors.text.primary,
+  },
+  modalOptionNameSelected: {
+    color: colors.accent.primary,
+  },
+  modalOptionMeta: {
+    ...typography.caption,
+    color: colors.text.muted,
   },
 });

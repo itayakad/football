@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ActivityIndicator, Modal, Pressable, ScrollView
 import { useQuery } from '@tanstack/react-query';
 
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { Card } from '../components/Card';
 import { typography, spacing, colors, radius } from '../theme';
 import { api } from '../api/client';
@@ -41,10 +42,7 @@ export const LeagueScreen: React.FC = () => {
 
   return (
     <ScreenContainer>
-      <View>
-        <Text style={typography.label}>{standings.league?.name}</Text>
-        <Text style={typography.title}>Standings</Text>
-      </View>
+      <ScreenHeader label={standings.league?.name ?? 'League'} title="Standings" />
 
       <Card padded={false}>
         <View style={styles.header}>

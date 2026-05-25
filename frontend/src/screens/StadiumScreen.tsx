@@ -3,15 +3,13 @@ import { Text, View, StyleSheet } from 'react-native';
 
 import { Card } from '../components/Card';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { SectionLabel } from '../components/SectionLabel';
 import { colors, spacing, typography } from '../theme';
 
 export const StadiumScreen: React.FC = () => (
   <ScreenContainer>
-    <View>
-      <Text style={typography.label}>Club Infrastructure</Text>
-      <Text style={[typography.display, styles.title]}>Stadium</Text>
-    </View>
+    <ScreenHeader label="Club Infrastructure" title="Stadium" />
 
     <Card>
       <SectionLabel>Coming Soon</SectionLabel>
@@ -26,9 +24,6 @@ export const StadiumScreen: React.FC = () => (
 );
 
 const styles = StyleSheet.create({
-  title: {
-    marginTop: spacing.xs,
-  },
   note: {
     color:     colors.text.secondary,
     marginTop: spacing.sm,

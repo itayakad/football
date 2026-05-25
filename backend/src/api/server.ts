@@ -86,6 +86,9 @@ const STARTER_COUNTS_BY_POSITION: Record<string, number> = {
   S: 2,
 };
 
+const OFFENSE_POSITIONS = new Set(['QB', 'RB', 'WR', 'TE', 'OL']);
+const DEFENSE_POSITIONS = new Set(['DE', 'DT', 'LB', 'CB', 'S']);
+
 function playerSeed(player: RosterPlayer): number {
   return idSeed(player.id);
 }
@@ -956,7 +959,27 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
     };
 
     const recommendation = recommendGameplan(myProfile);
-    const oppGroups      = computePositionGroups(startersByOverall(sortByOverall(oppPlayers)));
+    const oppStarters    = startersByOverall(sortByOverall(oppPlayers));
+    const oppGroups      = computePositionGroups(oppStarters);
+    const oppTopOffense  = oppStarters
+      .filter((p) => OFFENSE_POSITIONS.has(p.position))
+      .sort((a, b) => b.overall - a.overall)
+      .slice(0, 3)
+      .map((p) => ({ id: p.id, name: p.name, position: p.position, overall: p.overall, age: p.age }));
+    const oppTopDefense  = oppStarters
+      .filter((p) => DEFENSE_POSITIONS.has(p.position))
+      .sort((a, b) => b.overall - a.overall)
+      .slice(0, 3)
+      .map((p) => ({ id: p.id, name: p.name, position: p.position, overall: p.overall, age: p.age }));
+    const oppStaff = oppCoaches
+      .sort((a, b) => coachPositionOrder(a.position) - coachPositionOrder(b.position))
+      .map((coach) => ({
+        id:        coach.id,
+        name:      coach.name,
+        position:  coach.position,
+        archetype: personnelArchetype(coach),
+        overall:   coach.overall,
+      }));
     await ensureDefaultSchemes(myTeam.id);
     const mySchemes = await prisma.teamScheme.findMany({
       where: { teamId: myTeam.id },
@@ -991,6 +1014,9 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
         offenseRating: opp.offenseRating,
         defenseRating: opp.defenseRating,
         groups:        oppGroups,
+        topOffense:    oppTopOffense,
+        topDefense:    oppTopDefense,
+        coaches:       oppStaff,
       },
       recommendation,
       schemes: mySchemes.map(schemePayload),

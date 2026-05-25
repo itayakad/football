@@ -45,27 +45,27 @@ export function RootNavigator() {
       <Stack.Screen
         name="Stadium"
         component={StadiumScreen}
-        options={{ title: 'Stadium' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Friends"
         component={FriendsScreen}
-        options={{ title: 'Friends' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ title: 'Settings' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="League"
         component={LeagueScreen}
-        options={{ title: 'League' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="MatchPreview"
         component={MatchPreviewScreen}
-        options={{ title: 'Match Preview' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="ChooseScheme"
