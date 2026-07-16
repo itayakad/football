@@ -1093,6 +1093,20 @@ app.get('/api/match/:matchId', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── GET /api/leagues ─────────────────────────────────────
+//
+// Lists all leagues sorted by tier (1 = top). Powers the league switcher.
+//
+app.get('/api/leagues', async (_req, res, next) => {
+  try {
+    const leagues = await prisma.league.findMany({
+      orderBy: { tier: 'asc' },
+      select:  { id: true, name: true, tier: true },
+    });
+    res.json({ leagues });
+  } catch (e) { next(e); }
+});
+
 // ─── GET /api/league/:leagueId/standings ──────────────────
 //
 app.get('/api/league/:leagueId/standings', async (req, res, next) => {
@@ -1148,6 +1162,8 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   console.error(err);
   res.status(500).json({ error: err.message ?? 'Internal server error' });
 });
+
+console.log('Loading play catalog...');
 
 loadPlayCatalog(prisma)
   .then(() => {

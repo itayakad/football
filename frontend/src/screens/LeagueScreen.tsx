@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator, Modal, Pressable, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -8,23 +9,34 @@ import { Card } from '../components/Card';
 import { typography, spacing, colors, radius } from '../theme';
 import { api } from '../api/client';
 import { useUserTeamId } from '../state/userTeam';
-import { LeagueStandingsResponse } from '../api/types';
+import { DefensiveIdentity, LeagueStandingsResponse, LeaguesResponse, OffensiveIdentity } from '../api/types';
+import { teamArchetypeLabel } from '../utils/teamArchetype';
 
 type StandingRow = LeagueStandingsResponse['standings'][number];
+type IoniconName = React.ComponentProps<typeof Ionicons>['name'];
 
 export const LeagueScreen: React.FC = () => {
   const userTeamId = useUserTeamId();
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
+  const [activeLeagueId, setActiveLeagueId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const { data: me } = useQuery({
     queryKey: ['me'],
     queryFn:  () => api.me(),
   });
 
+  const { data: allLeagues } = useQuery({
+    queryKey: ['leagues'],
+    queryFn:  () => api.leagues(),
+  });
+
+  const viewedLeagueId = activeLeagueId ?? me?.leagueId ?? null;
+
   const { data: standings, isLoading } = useQuery({
-    queryKey: ['standings', me?.leagueId],
-    queryFn: () => api.leagueStandings(me!.leagueId),
-    enabled:  !!me?.leagueId,
+    queryKey: ['standings', viewedLeagueId],
+    queryFn: () => api.leagueStandings(viewedLeagueId!),
+    enabled:  !!viewedLeagueId,
   });
 
   if (!userTeamId || isLoading || !standings) {
@@ -35,14 +47,16 @@ export const LeagueScreen: React.FC = () => {
     );
   }
 
-  const selectedTeam = standings.standings.find((row) => row.teamId === selectedTeamId) ?? null;
-  const selectedRank = selectedTeam
-    ? standings.standings.findIndex((row) => row.teamId === selectedTeam.teamId) + 1
-    : 0;
+  const leagueOptions = allLeagues?.leagues ?? [];
+  const canPick = leagueOptions.length > 1;
 
   return (
     <ScreenContainer>
-      <ScreenHeader label={standings.league?.name ?? 'League'} title="Standings" />
+      <ScreenHeader
+        label="Standings"
+        title={standings.league?.name ?? 'League'}
+        onTitlePress={canPick ? () => setPickerOpen(true) : undefined}
+      />
 
       <Card padded={false}>
         <View style={styles.header}>
@@ -59,45 +73,58 @@ export const LeagueScreen: React.FC = () => {
           const total  = standings.standings.length;
           const zone   = zoneForRank(rank, total);
           const isPlayoffCutoff = rank === 6;
+          const isLast = i === standings.standings.length - 1;
+          const isExpanded = row.teamId === expandedTeamId;
           return (
-            <Pressable
-              key={row.teamId}
-              onPress={() => setSelectedTeamId(row.teamId)}
-              style={[
-                styles.row,
-                zone === 'PROMOTION'  && styles.rowPromotion,
-                zone === 'RELEGATION' && styles.rowRelegation,
-                isPlayoffCutoff && styles.rowPlayoffCutoff,
-                !isPlayoffCutoff && i < standings.standings.length - 1 && styles.rowDivider,
-              ]}
-            >
-              <View style={styles.colRank}>
-                <Text style={[
-                  typography.heading,
-                  { fontSize: 16 },
-                  isUser && { color: colors.accent.primary },
-                ]}>
-                  {rank}
-                </Text>
-              </View>
-              <View style={styles.colTeam}>
+            <View key={row.teamId}>
+              <Pressable
+                onPress={() => setExpandedTeamId(isExpanded ? null : row.teamId)}
+                style={[
+                  styles.row,
+                  zone === 'PROMOTION'  && styles.rowPromotion,
+                  zone === 'RELEGATION' && styles.rowRelegation,
+                  isExpanded && styles.rowExpanded,
+                  !isExpanded && isPlayoffCutoff && styles.rowPlayoffCutoff,
+                  !isExpanded && !isPlayoffCutoff && !isLast && styles.rowDivider,
+                ]}
+              >
+                <View style={styles.colRank}>
+                  <Text style={[
+                    typography.heading,
+                    { fontSize: 16 },
+                    isUser && { color: colors.accent.primary },
+                  ]}>
+                    {rank}
+                  </Text>
+                </View>
+                <View style={styles.colTeam}>
+                  <Text style={[
+                    typography.body,
+                    isUser && { color: colors.accent.primary, fontWeight: '700' },
+                  ]} numberOfLines={1}>
+                    {row.teamName}
+                  </Text>
+                </View>
+                <Text style={[typography.body, styles.colNum]}>{row.wins}</Text>
+                <Text style={[typography.body, styles.colNum]}>{row.losses}</Text>
                 <Text style={[
                   typography.body,
-                  isUser && { color: colors.accent.primary, fontWeight: '700' },
-                ]} numberOfLines={1}>
-                  {row.teamName}
+                  styles.colDiff,
+                  { color: row.diff > 0 ? colors.success : row.diff < 0 ? colors.danger : colors.text.secondary },
+                ]}>
+                  {row.diff >= 0 ? '+' : ''}{row.diff}
                 </Text>
-              </View>
-              <Text style={[typography.body, styles.colNum]}>{row.wins}</Text>
-              <Text style={[typography.body, styles.colNum]}>{row.losses}</Text>
-              <Text style={[
-                typography.body,
-                styles.colDiff,
-                { color: row.diff > 0 ? colors.success : row.diff < 0 ? colors.danger : colors.text.secondary },
-              ]}>
-                {row.diff >= 0 ? '+' : ''}{row.diff}
-              </Text>
-            </Pressable>
+              </Pressable>
+
+              {isExpanded && (
+                <TeamExpandPanel
+                  team={row}
+                  isPlayoffCutoff={isPlayoffCutoff}
+                  isLast={isLast}
+                  canTrade={viewedLeagueId === me?.leagueId && row.teamId !== userTeamId}
+                />
+              )}
+            </View>
           );
         })}
 
@@ -109,12 +136,78 @@ export const LeagueScreen: React.FC = () => {
 
       <PlayoffPictureCard standings={standings.standings} userTeamId={userTeamId} />
 
-      <TeamProfileModal
-        team={selectedTeam}
-        rank={selectedRank}
-        onClose={() => setSelectedTeamId(null)}
+      <LeaguePicker
+        visible={pickerOpen}
+        leagues={leagueOptions}
+        activeLeagueId={viewedLeagueId}
+        homeLeagueId={me?.leagueId ?? null}
+        onSelect={(id) => {
+          setActiveLeagueId(id);
+          setExpandedTeamId(null);
+          setPickerOpen(false);
+        }}
+        onClose={() => setPickerOpen(false)}
       />
     </ScreenContainer>
+  );
+};
+
+const LeaguePicker: React.FC<{
+  visible:        boolean;
+  leagues:        LeaguesResponse['leagues'];
+  activeLeagueId: string | null;
+  homeLeagueId:   string | null;
+  onSelect:       (id: string) => void;
+  onClose:        () => void;
+}> = ({ visible, leagues, activeLeagueId, homeLeagueId, onSelect, onClose }) => {
+  if (!visible) return null;
+  return (
+    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.pickerBackdrop} onPress={onClose}>
+        <Pressable style={styles.pickerSheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.pickerHeader}>
+            <Text style={typography.label}>Switch League</Text>
+            <Pressable onPress={onClose} style={styles.pickerClose}>
+              <Ionicons name="close" size={18} color={colors.text.secondary} />
+            </Pressable>
+          </View>
+
+          <ScrollView contentContainerStyle={{ gap: spacing.sm }} showsVerticalScrollIndicator={false}>
+            {leagues.map((league) => {
+              const isActive = league.id === activeLeagueId;
+              const isHome   = league.id === homeLeagueId;
+              return (
+                <Pressable
+                  key={league.id}
+                  onPress={() => onSelect(league.id)}
+                  style={[
+                    styles.pickerRow,
+                    isActive && styles.pickerRowActive,
+                  ]}
+                >
+                  <Text style={styles.pickerTier}>T{league.tier}</Text>
+                  <View style={styles.pickerNameCol}>
+                    <Text style={[
+                      typography.body,
+                      { fontWeight: '800' },
+                      isActive && { color: colors.accent.primary },
+                    ]} numberOfLines={1}>
+                      {league.name}
+                    </Text>
+                    {isHome && (
+                      <Text style={styles.pickerHomeTag}>YOUR LEAGUE</Text>
+                    )}
+                  </View>
+                  {isActive && (
+                    <Ionicons name="checkmark" size={18} color={colors.accent.primary} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 };
 
@@ -221,104 +314,119 @@ const LegendDot: React.FC<{ color: string; label: string }> = ({ color, label })
   </View>
 );
 
-const TeamProfileModal: React.FC<{
-  team: StandingRow | null;
-  rank: number;
-  onClose: () => void;
-}> = ({ team, rank, onClose }) => {
-  const coaches = useMemo(() => {
-    if (!team) return [];
-    const byPosition = new Map(team.coaches.map((coach) => [coach.position, coach]));
-    return [
-      { label: 'HC', coach: byPosition.get('HC') },
-      { label: 'OC', coach: byPosition.get('OC') },
-      { label: 'DC', coach: byPosition.get('DC') },
-    ];
-  }, [team]);
-
-  if (!team) return null;
-
-  const rankColor =
-    rank <= 3 ? colors.success :
-    rank > 0 && rank > (team ? 5 : 0) ? colors.danger :
-    colors.text.primary;
-
+const TeamExpandPanel: React.FC<{
+  team: StandingRow;
+  isPlayoffCutoff: boolean;
+  isLast: boolean;
+  canTrade: boolean;
+}> = ({ team, isPlayoffCutoff, isLast, canTrade }) => {
+  const offColor = offensiveIdentityColor(team.identity.offense);
+  const defColor = defensiveIdentityColor(team.identity.defense);
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.profileSheet}>
-          <View style={styles.profileHeader}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{teamInitials(team.teamName)}</Text>
-            </View>
-            <View style={styles.profileTitle}>
-              <Text style={typography.label}>League Standing</Text>
-              <Text style={styles.profileName}>{team.teamName}</Text>
-              <Text style={[typography.caption, { color: rankColor }]}>Rank #{rank}</Text>
-            </View>
-            <Pressable onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeText}>x</Text>
-            </Pressable>
-          </View>
-
-          <ScrollView contentContainerStyle={{ gap: spacing.lg }} showsVerticalScrollIndicator={false}>
-            <View style={styles.statusGrid}>
-              <StatusTile label="Record" value={`${team.wins}-${team.losses}${team.ties ? `-${team.ties}` : ''}`} />
-              <StatusTile label="PF"     value={`${team.pointsFor}`} />
-              <StatusTile label="PA"     value={`${team.pointsAgainst}`} />
-              <StatusTile
-                label="Diff"
-                value={`${team.diff >= 0 ? '+' : ''}${team.diff}`}
-                tone={team.diff > 0 ? colors.success : team.diff < 0 ? colors.danger : colors.text.primary}
-              />
-            </View>
-
-            <View style={styles.profileSection}>
-              <Text style={typography.label}>Staff</Text>
-              {coaches.map(({ label, coach }) => (
-                <View key={label} style={styles.staffRow}>
-                  <Text style={styles.staffRole}>{label}</Text>
-                  <View style={styles.staffMain}>
-                    <Text style={typography.body}>{coach?.name ?? 'Vacant'}</Text>
-                    {coach && (
-                      <Text style={typography.caption} numberOfLines={1}>
-                        {coach.archetype} / {coach.overall} OVR
-                      </Text>
-                    )}
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.profileSection}>
-              <Text style={typography.label}>Top Players</Text>
-              {team.topPlayers.map((player) => (
-                <View key={player.id} style={styles.playerRow}>
-                  <Text style={typography.body} numberOfLines={1}>{player.name}</Text>
-                  <Text style={typography.caption}>{player.position} / {player.overall} OVR / Age {player.age}</Text>
-                </View>
-              ))}
-            </View>
-          </ScrollView>
+    <View style={[
+      styles.expandPanel,
+      isPlayoffCutoff && styles.expandPanelPlayoffCutoff,
+      !isPlayoffCutoff && !isLast && styles.expandPanelDivider,
+    ]}>
+      <View style={styles.identityRow}>
+        <View style={[styles.identityChip, { backgroundColor: withAlpha(offColor, 0.18) }]}>
+          <Ionicons name={offensiveIdentityIcon(team.identity.offense)} size={14} color={offColor} />
+          <Text style={[styles.identityChipLabel, { color: offColor }]}>
+            {offensiveIdentityLabel(team.identity.offense)}
+          </Text>
         </View>
+        <View style={[styles.identityChip, { backgroundColor: withAlpha(defColor, 0.18) }]}>
+          <Ionicons name={defensiveIdentityIcon(team.identity.defense)} size={14} color={defColor} />
+          <Text style={[styles.identityChipLabel, { color: defColor }]}>
+            {defensiveIdentityLabel(team.identity.defense)}
+          </Text>
+        </View>
+        <View style={styles.identitySpacer} />
+        <Text style={styles.archetypeLabel} numberOfLines={1}>
+          {teamArchetypeLabel(team.identity)}
+        </Text>
       </View>
-    </Modal>
+
+      <View style={styles.playersList}>
+        <Text style={styles.playersHeader}>Top Players</Text>
+        {team.topPlayers.slice(0, 3).map((player) => (
+          <View key={player.id} style={styles.playerRow}>
+            <Text style={styles.playerPos}>{player.position}</Text>
+            <Text style={[typography.body, styles.playerName]} numberOfLines={1}>{player.name}</Text>
+            <Text style={[typography.heading, styles.playerOvr]}>{player.overall}</Text>
+          </View>
+        ))}
+      </View>
+
+      {canTrade && (
+        <Pressable style={styles.tradeButton} onPress={() => {}}>
+          <Text style={styles.tradeButtonText}>Trade</Text>
+        </Pressable>
+      )}
+    </View>
   );
 };
 
-function teamInitials(name: string): string {
-  const parts = name.split(' ').filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+function withAlpha(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
-const StatusTile: React.FC<{ label: string; value: string; tone?: string }> = ({ label, value, tone }) => (
-  <View style={styles.statusTile}>
-    <Text style={typography.label}>{label}</Text>
-    <Text style={[typography.heading, tone ? { color: tone } : null]}>{value}</Text>
-  </View>
-);
+function offensiveIdentityIcon(identity: OffensiveIdentity): IoniconName {
+  const icons: Record<OffensiveIdentity, IoniconName> = {
+    VERTICAL:   'rocket-outline',
+    RUN_HEAVY:  'footsteps-outline',
+    PASS_HEAVY: 'send-outline',
+    BALANCED:   'options-outline',
+  };
+  return icons[identity];
+}
+
+function defensiveIdentityIcon(identity: DefensiveIdentity): IoniconName {
+  const icons: Record<DefensiveIdentity, IoniconName> = {
+    PRESSURE:   'flash-outline',
+    MAN_HEAVY:  'person-outline',
+    ZONE_HEAVY: 'grid-outline',
+    BALANCED:   'shield-checkmark-outline',
+  };
+  return icons[identity];
+}
+
+function offensiveIdentityColor(identity: OffensiveIdentity): string {
+  if (identity === 'VERTICAL' || identity === 'PASS_HEAVY') return colors.identity.pass;
+  if (identity === 'RUN_HEAVY') return colors.identity.run;
+  return colors.identity.bal;
+}
+
+function defensiveIdentityColor(identity: DefensiveIdentity): string {
+  if (identity === 'PRESSURE')   return colors.identity.agg;
+  if (identity === 'MAN_HEAVY')  return colors.identity.man;
+  if (identity === 'ZONE_HEAVY') return colors.identity.zone;
+  return colors.identity.bal;
+}
+
+function offensiveIdentityLabel(identity: OffensiveIdentity): string {
+  const labels: Record<OffensiveIdentity, string> = {
+    VERTICAL:   'Vertical',
+    RUN_HEAVY:  'Run-Heavy',
+    PASS_HEAVY: 'Pass-Heavy',
+    BALANCED:   'Balanced',
+  };
+  return labels[identity];
+}
+
+function defensiveIdentityLabel(identity: DefensiveIdentity): string {
+  const labels: Record<DefensiveIdentity, string> = {
+    PRESSURE:   'Pressure',
+    MAN_HEAVY:  'Man',
+    ZONE_HEAVY: 'Zone',
+    BALANCED:   'Balanced',
+  };
+  return labels[identity];
+}
 
 
 const styles = StyleSheet.create({
@@ -349,6 +457,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.divider,
   },
+  rowExpanded: {
+    backgroundColor: colors.bg.surface,
+  },
   colRank: { width: 32 },
   colTeam: { flex:  1, paddingRight: spacing.sm },
   colNum:  { width: 32, textAlign: 'center' },
@@ -371,6 +482,92 @@ const styles = StyleSheet.create({
     width:        12,
     height:       12,
     borderRadius: 3,
+  },
+  expandPanel: {
+    backgroundColor:   colors.bg.surface,
+    paddingHorizontal: spacing.lg,
+    paddingVertical:   spacing.md,
+    gap:               spacing.md,
+    borderTopWidth:    1,
+    borderTopColor:    colors.divider,
+  },
+  expandPanelDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  expandPanelPlayoffCutoff: {
+    borderBottomWidth: 2,
+    borderBottomColor: colors.accent.primary,
+  },
+  identityRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           spacing.sm,
+  },
+  identityChip: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical:   4,
+    borderRadius:      radius.pill,
+  },
+  identityChipLabel: {
+    ...typography.caption,
+    fontWeight: '800',
+    fontSize:   11,
+  },
+  identitySpacer: { flex: 1 },
+  archetypeLabel: {
+    ...typography.label,
+    color:        colors.text.primary,
+    fontWeight:   '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  playersList: {
+    gap: spacing.xs,
+  },
+  playersHeader: {
+    ...typography.label,
+    color:         colors.text.secondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom:  spacing.xs,
+  },
+  playerRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               spacing.sm,
+    paddingVertical:   spacing.xs,
+    paddingHorizontal: spacing.sm,
+    backgroundColor:   colors.bg.elevated,
+    borderRadius:      radius.sm,
+  },
+  playerPos: {
+    ...typography.label,
+    width:      36,
+    color:      colors.accent.primary,
+    fontWeight: '800',
+  },
+  playerName: {
+    flex: 1,
+  },
+  playerOvr: {
+    width:      32,
+    textAlign:  'right',
+    color:      colors.accent.primary,
+  },
+  tradeButton: {
+    paddingVertical: spacing.md,
+    backgroundColor: colors.accent.primary,
+    borderRadius:    radius.md,
+    alignItems:      'center',
+  },
+  tradeButtonText: {
+    ...typography.label,
+    color:      colors.bg.elevated,
+    fontWeight: '800',
   },
   bracket: {
     flexDirection: 'row',
@@ -448,94 +645,61 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     fontSize:  10,
   },
-  modalBackdrop: {
+  pickerBackdrop: {
     flex:            1,
     backgroundColor: colors.bg.overlay,
     justifyContent:  'flex-end',
   },
-  profileSheet: {
+  pickerSheet: {
     backgroundColor:      colors.bg.elevated,
     borderTopLeftRadius:  radius.xl,
     borderTopRightRadius: radius.xl,
     padding:              spacing.lg,
-    gap:                  spacing.lg,
-    maxHeight:            '88%',
+    gap:                  spacing.md,
+    maxHeight:            '70%',
   },
-  profileHeader: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing.md,
+  pickerHeader: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
   },
-  avatar: {
-    width:           64,
-    height:          64,
-    borderRadius:    32,
-    backgroundColor: colors.bg.surface,
-    alignItems:      'center',
-    justifyContent:  'center',
-    borderWidth:     1,
-    borderColor:     colors.border,
-  },
-  avatarText: {
-    ...typography.heading,
-    color: colors.text.secondary,
-  },
-  profileTitle: {
-    flex: 1,
-    gap:  spacing.xs,
-  },
-  profileName: {
-    ...typography.title,
-    fontSize: 22,
-  },
-  closeButton: {
-    width:           36,
-    height:          36,
-    borderRadius:    18,
+  pickerClose: {
+    width:           32,
+    height:          32,
+    borderRadius:    16,
     backgroundColor: colors.bg.surface,
     alignItems:      'center',
     justifyContent:  'center',
   },
-  closeText: {
-    ...typography.heading,
-    color: colors.text.secondary,
+  pickerRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    gap:               spacing.md,
+    paddingVertical:   spacing.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor:   colors.bg.surface,
+    borderRadius:      radius.md,
+    borderWidth:       1,
+    borderColor:       colors.border,
   },
-  profileSection: {
-    gap: spacing.sm,
+  pickerRowActive: {
+    borderColor: colors.accent.primary,
   },
-  statusGrid: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
-    gap:           spacing.sm,
-  },
-  statusTile: {
-    width:           '48%',
-    backgroundColor: colors.bg.surface,
-    borderRadius:    radius.sm,
-    padding:         spacing.md,
-    gap:             spacing.xs,
-  },
-  staffRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.xs,
-  },
-  staffRole: {
+  pickerTier: {
     ...typography.label,
-    width: 28,
-    color: colors.accent.primary,
-  },
-  staffMain: {
-    flex: 1,
-  },
-  playerRow: {
-    backgroundColor: colors.bg.surface,
-    borderRadius: 8,
-    padding: spacing.sm,
-  },
-  historyLabel: {
-    ...typography.body,
+    width:      32,
+    color:      colors.text.secondary,
     fontWeight: '800',
+  },
+  pickerNameCol: {
+    flex: 1,
+    gap:  2,
+  },
+  pickerHomeTag: {
+    ...typography.caption,
+    color:         colors.accent.primary,
+    fontWeight:    '800',
+    letterSpacing: 0.8,
+    fontSize:      10,
   },
 });

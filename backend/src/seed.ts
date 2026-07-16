@@ -47,7 +47,7 @@ const TEAMS_BY_TIER: Record<number, Array<{
     { name: 'New York Titans',    offense: 88, defense: 82, offenseStyle: 'BALANCED',   defenseStyle: 'AGGRESSIVE' },
     { name: 'Los Angeles Wolves', offense: 83, defense: 79, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   },
     { name: 'Chicago Storm',      offense: 78, defense: 85, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
-    { name: 'Dallas Vanguard',    offense: 85, defense: 75, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' },
+    { name: 'Atlanta Blaze',      offense: 75, defense: 74, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' },
     { name: 'Miami Thunder',      offense: 76, defense: 78, offenseStyle: 'PASS_HEAVY', defenseStyle: 'PREVENT'    },
     { name: 'Seattle Falcons',    offense: 80, defense: 83, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    },
     { name: 'Boston Monarchs',    offense: 74, defense: 80, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'BALANCED'   },
@@ -56,7 +56,7 @@ const TEAMS_BY_TIER: Record<number, Array<{
     { name: 'Pittsburgh Iron',     offense: 74, defense: 86, offenseStyle: 'RUN_HEAVY', defenseStyle: 'AGGRESSIVE' },
   ],
   2: [
-    { name: 'Atlanta Blaze',      offense: 73, defense: 68, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' },
+    { name: 'Dallas Vanguard',    offense: 80, defense: 72, offenseStyle: 'PASS_HEAVY', defenseStyle: 'AGGRESSIVE' },
     { name: 'Houston Force',      offense: 68, defense: 73, offenseStyle: 'RUN_HEAVY',  defenseStyle: 'AGGRESSIVE' },
     { name: 'Phoenix Fury',       offense: 70, defense: 65, offenseStyle: 'PASS_HEAVY', defenseStyle: 'BALANCED'   },
     { name: 'Portland Surge',     offense: 65, defense: 71, offenseStyle: 'BALANCED',   defenseStyle: 'PREVENT'    },
@@ -414,6 +414,10 @@ async function clearAndSeed() {
 
 if (require.main === module) {
   clearAndSeed()
-    .then(() => prisma.$disconnect())
-    .catch((e) => { console.error(e); prisma.$disconnect(); process.exit(1); });
+    .then(() => {
+      console.log('Seed complete.');
+      // This is a one-shot CLI; all database writes have completed here.
+      process.exit(0);
+    })
+    .catch((e) => { console.error(e); process.exit(1); });
 }

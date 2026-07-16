@@ -1,6 +1,6 @@
 import {
   MeResponse, DashboardResponse, MatchPreviewResponse, SimulateResponse, Gameplan,
-  LeagueStandingsResponse, RosterResponse, HistoryResponse,
+  LeaguesResponse, LeagueStandingsResponse, RosterResponse, HistoryResponse,
   OffseasonResponse, CoachMarketResponse, PlayerFreeAgentResponse,
   OffensivePhilosophy, PlayTemplate,
   SchemeUnit, TeamScheme,
@@ -47,6 +47,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ userTeamId, offenseSchemeId, defenseSchemeId }),
     }),
+
+  leagues: () =>
+    request<LeaguesResponse>('/api/leagues'),
 
   leagueStandings: (leagueId: string) =>
     request<LeagueStandingsResponse>(`/api/league/${leagueId}/standings`),

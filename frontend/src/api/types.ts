@@ -206,6 +206,14 @@ export interface MatchPreviewResponse {
   };
 }
 
+export interface LeaguesResponse {
+  leagues: Array<{
+    id:   string;
+    name: string;
+    tier: number;
+  }>;
+}
+
 export interface LeagueStandingsResponse {
   league: {
     id:   string;

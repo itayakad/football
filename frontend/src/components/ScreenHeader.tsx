@@ -14,13 +14,14 @@ export interface ScreenHeaderIcon {
 }
 
 interface Props {
-  label:  string;
-  title:  string;
-  icons?: ScreenHeaderIcon[];
-  right?: React.ReactNode;
+  label:        string;
+  title:        string;
+  icons?:       ScreenHeaderIcon[];
+  right?:       React.ReactNode;
+  onTitlePress?: () => void;
 }
 
-export const ScreenHeader: React.FC<Props> = ({ label, title, icons, right }) => {
+export const ScreenHeader: React.FC<Props> = ({ label, title, icons, right, onTitlePress }) => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const rightNode = right !== undefined ? right : (
     <Pressable
@@ -51,7 +52,18 @@ export const ScreenHeader: React.FC<Props> = ({ label, title, icons, right }) =>
         </View>
         {rightNode}
       </View>
-      <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      {onTitlePress ? (
+        <Pressable
+          onPress={onTitlePress}
+          accessibilityRole="button"
+          style={({ pressed }) => [styles.titleRow, pressed && styles.titleRowPressed]}
+        >
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          <Ionicons name="chevron-down" size={20} color={colors.text.secondary} />
+        </Pressable>
+      ) : (
+        <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      )}
     </View>
   );
 };
@@ -118,5 +130,14 @@ const styles = StyleSheet.create({
     color:      colors.text.primary,
     flexShrink: 1,
     minWidth:   0,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           spacing.xs,
+    alignSelf:     'flex-start',
+  },
+  titleRowPressed: {
+    opacity: 0.6,
   },
 });
