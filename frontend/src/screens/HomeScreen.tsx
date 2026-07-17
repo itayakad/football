@@ -1,577 +1,228 @@
 import React from 'react';
-import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { NavigationProp, useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 
-import { ScreenContainer } from '../components/ScreenContainer';
-import { Card } from '../components/Card';
-import { SectionLabel } from '../components/SectionLabel';
 import { api } from '../api/client';
+import { RosterResponse } from '../api/types';
+import { OpponentPanel } from '../components/pixel/OpponentPanel';
+import { PixelButton } from '../components/pixel/PixelButton';
+import { PixelImageFrame } from '../components/pixel/PixelImageFrame';
+import { TeamBus } from '../components/pixel/TeamBus';
+import { pixelAssets } from '../components/pixel/assets';
 import { useUserTeamId } from '../state/userTeam';
-import { colors, spacing, typography, radius } from '../theme';
 import { RootStackParamList } from '../navigation/types';
-import { NewsItem, TeamIdentity } from '../api/types';
-import { teamArchetypeLabel } from '../utils/teamArchetype';
-
-const NEWS_CARD_HEIGHT = 174;
-const NEWS_REPEAT_COUNT = 7;
-const NEWS_REPEAT_MIDDLE = Math.floor(NEWS_REPEAT_COUNT / 2);
-const EMPTY_NEWS: NewsItem[] = [];
-
-type IconName = keyof typeof Ionicons.glyphMap;
+import { pixelTypography } from '../theme';
 
 export const HomeScreen: React.FC = () => {
   const userTeamId = useUserTeamId();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const newsWheelRef = React.useRef<ScrollView>(null);
-  const [activeNewsIndex, setActiveNewsIndex] = React.useState(0);
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const contentWidth = Math.max(0, screenWidth - 24);
+  const logoSize = fitImage(contentWidth * 0.78, 1798 / 579, 500, 161);
+  const panelSize = fitImage(contentWidth * 0.86, 1432 / 455, 548, 174);
+  const busSize = fitImage(contentWidth * 0.86, 1247 / 442, 548, 194);
+  const menuWidth = Math.min(contentWidth * 0.87, 568);
 
-  const { data, isLoading, error, refetch } = useQuery({
+  const { data: dashboard, isLoading, error, refetch } = useQuery({
     queryKey: ['dashboard', userTeamId],
     queryFn: () => api.dashboard(userTeamId!),
     enabled: !!userTeamId,
   });
-  const dashboardNews = data?.news ?? EMPTY_NEWS;
-  const repeatedNews = React.useMemo(
-    () => (dashboardNews.length > 0 ? Array.from({ length: NEWS_REPEAT_COUNT }, () => dashboardNews).flat() : []),
-    [dashboardNews],
-  );
+  const { data: roster } = useQuery({
+    queryKey: ['roster', userTeamId],
+    queryFn: () => api.roster(userTeamId!),
+    enabled: !!userTeamId,
+  });
 
-  // Auto-refetch on focus so next-match updates after a sim
-  React.useEffect(() => {
-    const unsub = navigation.addListener('focus', () => refetch());
-    return unsub;
-  }, [navigation, refetch]);
+  React.useEffect(() => navigation.addListener('focus', () => refetch()), [navigation, refetch]);
 
-  React.useEffect(() => {
-    setActiveNewsIndex(0);
-    if (dashboardNews.length < 2) return;
-
-    requestAnimationFrame(() => {
-      newsWheelRef.current?.scrollTo({
-        y: NEWS_REPEAT_MIDDLE * dashboardNews.length * NEWS_CARD_HEIGHT,
-        animated: false,
-      });
-    });
-  }, [dashboardNews]);
-
-  const handleNewsMomentumEnd = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (dashboardNews.length === 0) return;
-
-    const rawIndex = Math.round(event.nativeEvent.contentOffset.y / NEWS_CARD_HEIGHT);
-    const nextIndex = ((rawIndex % dashboardNews.length) + dashboardNews.length) % dashboardNews.length;
-    setActiveNewsIndex(nextIndex);
-
-    if (dashboardNews.length < 2) return;
-
-    const lowerResetPoint = dashboardNews.length;
-    const upperResetPoint = dashboardNews.length * (NEWS_REPEAT_COUNT - 1);
-    if (rawIndex <= lowerResetPoint || rawIndex >= upperResetPoint) {
-      newsWheelRef.current?.scrollTo({
-        y: (NEWS_REPEAT_MIDDLE * dashboardNews.length + nextIndex) * NEWS_CARD_HEIGHT,
-        animated: false,
-      });
-    }
-  };
-
-  if (!userTeamId || isLoading) {
-    return (
-      <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
-        <ActivityIndicator color={colors.accent.primary} style={{ marginTop: spacing.xxxl }} />
-      </ScreenContainer>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
-        <Text style={typography.body}>Failed to load dashboard. Is the backend running?</Text>
-      </ScreenContainer>
-    );
-  }
-
-  const { team, nextMatch, news } = data;
+  const occupantCount = occupantCountFor(roster);
 
   return (
-    <ScreenContainer scroll={false} contentStyle={styles.fixedContent}>
-      {/* ── Team Banner ──────────────────────────────────── */}
-      <View style={styles.bannerRow}>
-        <View style={styles.teamBanner}>
-          <Text style={styles.bannerTeamName} numberOfLines={1}>{team.name}</Text>
-          <Text style={styles.bannerLeague} numberOfLines={1}>{team.leagueName}</Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-          onPress={() => navigation.navigate('Settings')}
-          style={({ pressed }) => [styles.settingsButton, pressed && styles.actionButtonPressed]}
-        >
-          <Ionicons name="settings-outline" size={22} color={colors.text.primary} />
-        </Pressable>
-      </View>
+    <View style={styles.root}>
+      <Image
+        source={pixelAssets.background}
+        resizeMode="cover"
+        style={[
+          styles.backgroundImage,
+          {
+            transform: [
+              { scale: 1.35 },
+              { translateY: -screenHeight * 0.12 },
+            ],
+          },
+        ]}
+      />
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.content}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            onPress={() => navigation.navigate('Settings')}
+            style={({ pressed }) => [styles.settings, pressed && styles.pressed]}
+          >
+            <Image source={pixelAssets.settings} resizeMode="contain" style={styles.settingsImage} />
+          </Pressable>
 
-      {/* ── Primary Action: Next Match ───────────────────── */}
-      {nextMatch ? (
-        <Pressable
-          onPress={() => navigation.navigate('MatchPreview', { matchId: nextMatch.id })}
-          style={({ pressed }) => [styles.matchButton, pressed && styles.actionButtonPressed]}
-        >
-          <View style={styles.matchButtonTopRow}>
-            <View style={styles.matchButtonMeta}>
-              <Text style={styles.matchButtonLabel}>
-                {`Week ${nextMatch.week} / ${nextMatch.totalWeeks}`}
-              </Text>
-            </View>
-            <Text style={styles.actionArrowLight}>→</Text>
-          </View>
-          <View style={styles.matchButtonBody}>
-            <View style={styles.opponentMark}>
-              <Text style={styles.opponentInitial}>{nextMatch.opponent.name.slice(0, 1)}</Text>
-            </View>
-            <View style={styles.matchButtonCopy}>
-              <Text style={styles.matchButtonVersus}>{nextMatch.isHome ? 'vs' : '@'} Opponent</Text>
-              <Text style={styles.matchButtonOpponent} numberOfLines={1}>
-                {nextMatch.opponent.name}
-              </Text>
-              <OpponentIdentity identity={nextMatch.opponent.identity} />
-            </View>
-          </View>
-        </Pressable>
-      ) : (
-        <Card>
-          <Text style={typography.body}>Season complete. No upcoming matches.</Text>
-        </Card>
-      )}
+          <PixelImageFrame
+            source={pixelAssets.gameLogo}
+            aspectRatio={1798 / 579}
+            style={[styles.gameLogo, logoSize]}
+          />
 
-      {/* ── Nav Buttons ─────────────────────────────────── */}
-      <View style={styles.actionGrid}>
-        <NavButton label="Team" icon="shirt-outline" onPress={() => navigation.navigate('Team')} />
-        <NavButton label="League" icon="trophy-outline" onPress={() => navigation.navigate('League')} />
-        <NavButton label="Stadium" icon="business-outline" onPress={() => navigation.navigate('Stadium')} />
-        <NavButton label="Friends" icon="people-outline" onPress={() => navigation.navigate('Friends')} />
-      </View>
+          {dashboard ? (
+            <>
+              <TeamLeagueRow teamName={dashboard.team.name} leagueName={dashboard.team.leagueName} />
 
-      {/* ── League News ─────────────────────────────────── */}
-      {news && news.length > 0 && (
-        <View style={styles.newsSection}>
-          <View style={styles.newsHeaderRow}>
-            <SectionLabel>Around the League</SectionLabel>
-            <Text style={styles.newsCounter}>{activeNewsIndex + 1}/{news.length}</Text>
-          </View>
-          <View style={styles.newsWheel}>
-            <ScrollView
-              ref={newsWheelRef}
-              pagingEnabled
-              nestedScrollEnabled
-              showsVerticalScrollIndicator={false}
-              snapToInterval={NEWS_CARD_HEIGHT}
-              decelerationRate="fast"
-              onMomentumScrollEnd={handleNewsMomentumEnd}
-            >
-              {(news.length > 1 ? repeatedNews : news).map((item, idx) => (
-                <View key={`${item.headline}-${idx}`} style={styles.newsPage}>
-                  <NewsStory item={item} />
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-          {news.length > 1 && (
-            <View style={styles.newsDots}>
-              {news.map((_, idx) => (
-                <View
-                  key={idx}
-                  style={[
-                    styles.newsDot,
-                    idx === activeNewsIndex && styles.newsDotActive,
-                  ]}
+              <View style={[styles.panelWrap, panelSize]}>
+                {dashboard.nextMatch ? (
+                <OpponentPanel
+                  week={dashboard.nextMatch.week}
+                  totalWeeks={dashboard.nextMatch.totalWeeks}
+                  opponentName={dashboard.nextMatch.opponent.name}
+                  identity={dashboard.nextMatch.opponent.identity}
+                  onPress={() => navigation.navigate('MatchPreview', { matchId: dashboard.nextMatch!.id })}
                 />
-              ))}
+                ) : (
+                  <View style={styles.emptyPanel}>
+                    <Text style={pixelTypography.body}>SEASON COMPLETE</Text>
+                  </View>
+                )}
+              </View>
+            </>
+          ) : isLoading || !userTeamId ? (
+            <ActivityIndicator color="#DCEBFF" style={styles.loader} />
+          ) : (
+            <View style={styles.emptyPanel}>
+              <Text style={pixelTypography.caption}>
+                {error ? 'FAILED TO LOAD DASHBOARD' : 'NO DASHBOARD DATA'}
+              </Text>
             </View>
           )}
+
+          <View style={[styles.busWrap, busSize]}>
+            <TeamBus occupants={occupantCount} />
+          </View>
+
+          <View style={[styles.menuGrid, { width: menuWidth }]}>
+            <View style={styles.menuRow}>
+              <PixelButton
+                label="League"
+                tint="#116BBD"
+                icon={pixelAssets.trophy}
+                onPress={() => navigation.navigate('League')}
+              />
+              <PixelButton
+                label="Stadium"
+                tint="#4B9A1C"
+                icon={pixelAssets.stadium}
+                onPress={() => navigation.navigate('Stadium')}
+              />
+            </View>
+            <View style={styles.menuRow}>
+              <PixelButton
+                label="Friends"
+                tint="#62439B"
+                icon={pixelAssets.friends}
+                onPress={() => navigation.navigate('Friends')}
+              />
+              <PixelButton
+                label="Team"
+                tint="#D47A08"
+                icon={pixelAssets.team}
+                onPress={() => navigation.navigate('Team')}
+              />
+            </View>
+          </View>
         </View>
-      )}
-    </ScreenContainer>
+      </SafeAreaView>
+    </View>
   );
 };
 
-function NewsStory({ item }: { item: NewsItem }) {
+function TeamLeagueRow({ teamName, leagueName }: { teamName: string; leagueName: string }) {
   return (
-    <Card style={styles.newsCard}>
-      <View style={styles.newsRow}>
-        <View style={[styles.newsCategoryDot, { backgroundColor: newsCategoryColor(item.category) }]} />
-        <View style={styles.newsCopy}>
-          <Text style={styles.newsHeadline} numberOfLines={2}>
-            {item.headline}
-          </Text>
-          <Text style={styles.newsSummary} numberOfLines={3}>
-            {item.summary}
-          </Text>
-          {(item.sourceName || item.leagueName) && (
-            <Text style={styles.newsSource} numberOfLines={1}>
-              {item.sourceName ?? item.leagueName}
-            </Text>
-          )}
-        </View>
-      </View>
-    </Card>
-  );
-}
-
-function OpponentIdentity({ identity }: { identity: TeamIdentity }) {
-  return (
-    <View style={styles.opponentIdentityRow}>
-      <Text style={styles.opponentArchetype} numberOfLines={1}>
-        {teamArchetypeLabel(identity)}
-      </Text>
-      <View style={styles.opponentIdentityIcons}>
-        <IdentityIcon
-          icon={offenseIdentityIcon(identity.offense)}
-          color={offenseIdentityColor(identity.offense)}
-        />
-        <IdentityIcon
-          icon={defenseIdentityIcon(identity.defense)}
-          color={defenseIdentityColor(identity.defense)}
-        />
-      </View>
+    <View style={styles.teamLeagueRow}>
+      <Image source={pixelAssets.helmet} resizeMode="contain" style={styles.teamMark} />
+      <Text numberOfLines={1} adjustsFontSizeToFit style={styles.teamName}>{teamName}</Text>
+      <View style={styles.divider} />
+      <Image source={pixelAssets.league} resizeMode="contain" style={styles.leagueMark} />
+      <Text numberOfLines={1} adjustsFontSizeToFit style={styles.leagueName}>{leagueName}</Text>
     </View>
   );
 }
 
-function IdentityIcon({ icon, color }: { icon: IconName; color: string }) {
-  return (
-    <View style={styles.identityIcon}>
-      <Ionicons name={icon} size={13} color={color} />
-    </View>
-  );
+function occupantCountFor(roster?: RosterResponse) {
+  if (!roster) return 6;
+  const playerCount = roster.groups.reduce((count, group) => count + group.players.length, 0);
+  const coachCount = roster.team.coaches.length;
+  return Math.max(1, Math.min(6, playerCount + coachCount));
 }
 
-function NavButton({ label, icon, onPress }: { label: string; icon: IconName; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.actionButton,
-        styles.actionButtonActive,
-        pressed && styles.actionButtonPressed,
-      ]}
-    >
-      <View style={styles.actionTopRow}>
-        <View style={styles.actionIconWrap}>
-          <Ionicons name={icon} size={20} color={colors.text.primary} />
-        </View>
-        <Text style={styles.actionArrow}>→</Text>
-      </View>
-      <Text style={[styles.actionLabel, styles.actionLabelActive]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-function offenseIdentityIcon(identity: TeamIdentity['offense']): IconName {
-  switch (identity) {
-    case 'VERTICAL':   return 'trending-up';
-    case 'RUN_HEAVY':  return 'footsteps';
-    case 'PASS_HEAVY': return 'paper-plane';
-    case 'BALANCED':   return 'git-branch';
-  }
-}
-
-function defenseIdentityIcon(identity: TeamIdentity['defense']): IconName {
-  switch (identity) {
-    case 'PRESSURE':   return 'flash';
-    case 'MAN_HEAVY':  return 'person';
-    case 'ZONE_HEAVY': return 'grid';
-    case 'BALANCED':   return 'shield-checkmark';
-  }
-}
-
-function offenseIdentityColor(identity: TeamIdentity['offense']): string {
-  switch (identity) {
-    case 'VERTICAL':
-    case 'PASS_HEAVY':
-      return colors.identity.pass;
-    case 'RUN_HEAVY':
-      return colors.identity.run;
-    case 'BALANCED':
-      return colors.identity.bal;
-  }
-}
-
-function defenseIdentityColor(identity: TeamIdentity['defense']): string {
-  switch (identity) {
-    case 'PRESSURE':
-      return colors.identity.agg;
-    case 'MAN_HEAVY':
-      return colors.identity.man;
-    case 'ZONE_HEAVY':
-      return colors.identity.zone;
-    case 'BALANCED':
-      return colors.identity.bal;
-  }
-}
-
-function newsCategoryColor(category: string): string {
-  switch (category) {
-    case 'BLOWOUT':  return colors.identity.run;
-    case 'UPSET':    return colors.warn;
-    case 'THRILLER': return colors.identity.pass;
-    case 'STREAK':   return colors.success;
-    case 'COACH':    return colors.danger;
-    case 'PLAYER':   return colors.accent.primary;
-    case 'STANDINGS':return colors.text.secondary;
-    default:         return colors.text.muted;
-  }
+function fitImage(preferredWidth: number, aspectRatio: number, maxWidth: number, maxHeight: number) {
+  const width = Math.min(preferredWidth, maxWidth, maxHeight * aspectRatio);
+  return { width, height: width / aspectRatio };
 }
 
 const styles = StyleSheet.create({
-  fixedContent: {
-    paddingTop: spacing.lg,
-    gap:        spacing.lg,
+  root: { flex: 1, backgroundColor: '#2E8617' },
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: '100%',
+    height: '100%',
   },
-  bannerRow: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing.md,
-  },
-  teamBanner: {
-    flex:              1,
-    minHeight:         94,
-    borderRadius:      radius.lg,
-    backgroundColor:   colors.bg.elevated,
-    borderWidth:       1,
-    borderColor:       colors.border,
-    paddingVertical:   spacing.lg,
-    paddingHorizontal: spacing.lg,
-    justifyContent:    'center',
-  },
-  bannerTeamName: {
-    ...typography.title,
-    color: colors.text.primary,
-  },
-  bannerLeague: {
-    ...typography.label,
-    color:     colors.text.secondary,
-    marginTop: spacing.xs,
-  },
-  settingsButton: {
-    width:           52,
-    height:          52,
-    borderRadius:    26,
-    backgroundColor: colors.bg.elevated,
-    borderWidth:     1,
-    borderColor:     colors.border,
-    alignItems:      'center',
-    justifyContent:  'center',
-  },
-  newsSection: {
+  safe: { flex: 1, backgroundColor: 'transparent' },
+  content: {
     flex: 1,
-    minHeight: 0,
-  },
-  newsHeaderRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-    marginBottom:   spacing.sm,
-  },
-  newsCounter: {
-    ...typography.label,
-    color: colors.text.secondary,
-  },
-  newsWheel: {
-    height:        NEWS_CARD_HEIGHT,
-    borderRadius: radius.lg,
-    overflow:     'hidden',
-  },
-  newsPage: {
-    height: NEWS_CARD_HEIGHT,
-  },
-  newsCard: {
-    height:         NEWS_CARD_HEIGHT,
-    justifyContent: 'center',
-  },
-  newsRow: {
-    flexDirection: 'row',
-    gap:           spacing.md,
-    alignItems:    'flex-start',
-  },
-  newsCategoryDot: {
-    width:        8,
-    height:       8,
-    borderRadius: 4,
-    marginTop:    7,
-  },
-  newsCopy: {
-    flex: 1,
-  },
-  newsHeadline: {
-    ...typography.body,
-    color:      colors.text.primary,
-    fontWeight: '700',
-  },
-  newsSummary: {
-    ...typography.caption,
-    color:     colors.text.secondary,
-    marginTop: spacing.xs,
-  },
-  newsSource: {
-    ...typography.label,
-    color:     colors.text.muted,
-    fontSize:  10,
-    marginTop: spacing.xs,
-  },
-  newsDots: {
-    flexDirection:  'row',
-    justifyContent: 'center',
-    gap:            spacing.xs,
-    marginTop:      spacing.sm,
-  },
-  newsDot: {
-    width:           5,
-    height:          5,
-    borderRadius:    3,
-    backgroundColor: colors.text.muted,
-  },
-  newsDotActive: {
-    width:           16,
-    backgroundColor: colors.accent.primary,
-  },
-  actionGrid: {
-    flexDirection: 'row',
-    flexWrap:      'wrap',
-    gap:           spacing.sm,
-  },
-  actionButton: {
-    width:             '48.6%',
-    minHeight:         72,
-    borderRadius:      radius.md,
-    paddingVertical:   spacing.md,
-    paddingHorizontal: spacing.md,
-    gap:               spacing.xs,
-    justifyContent:    'space-between',
-  },
-  actionButtonActive: {
-    backgroundColor: colors.accent.primary,
-    borderWidth:     0,
-  },
-  actionButtonPressed: {
-    opacity: 0.85,
-  },
-  actionTopRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 12,
     justifyContent: 'space-between',
   },
-  actionIconWrap: {
-    width:           30,
-    height:          30,
-    borderRadius:    15,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    alignItems:      'center',
-    justifyContent:  'center',
-  },
-  actionLabel: {
-    fontSize:      16,
-    fontWeight:    '800',
-    letterSpacing: 0.4,
-  },
-  actionLabelActive: {
-    color: colors.text.primary,
-  },
-  actionArrow: {
-    fontSize:   18,
-    fontWeight: '800',
-    color:      colors.text.primary,
-  },
-  actionArrowLight: {
-    fontSize:   22,
-    fontWeight: '800',
-    color:      colors.text.primary,
-  },
-  matchButton: {
-    backgroundColor:   colors.accent.primary,
-    borderRadius:      radius.lg,
-    padding:           spacing.lg,
-    minHeight:         156,
-    gap:               spacing.md,
-    justifyContent:    'space-between',
-  },
-  matchButtonTopRow: {
-    flexDirection:  'row',
-    alignItems:     'center',
-    justifyContent: 'space-between',
-  },
-  matchButtonLabel: {
-    ...typography.label,
-    color: 'rgba(255,255,255,0.78)',
-  },
-  matchButtonMeta: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing.xs,
-  },
-  matchButtonBody: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing.md,
-  },
-  opponentMark: {
-    width:           60,
-    height:          60,
-    borderRadius:    18,
-    backgroundColor: 'rgba(11,12,14,0.28)',
-    borderWidth:     1,
-    borderColor:     'rgba(255,255,255,0.18)',
-    alignItems:      'center',
-    justifyContent:  'center',
-  },
-  opponentInitial: {
-    fontSize:   28,
-    fontWeight: '900',
-    color:      colors.text.primary,
-  },
-  matchButtonCopy: {
-    flex: 1,
-  },
-  matchButtonVersus: {
-    ...typography.label,
-    color:        'rgba(255,255,255,0.72)',
-    marginBottom: spacing.xs,
-  },
-  matchButtonOpponent: {
-    ...typography.title,
-    color: colors.text.primary,
-  },
-  opponentIdentityRow: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    alignSelf:       'flex-start',
-    maxWidth:        '100%',
-    gap:             spacing.sm,
-    marginTop:       spacing.sm,
-    borderRadius:    radius.pill,
-    backgroundColor: 'rgba(11,12,14,0.28)',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-  },
-  opponentArchetype: {
-    ...typography.label,
-    flexShrink: 1,
-    color:      colors.text.primary,
-    fontSize:   11,
-  },
-  opponentIdentityIcons: {
-    flexDirection: 'row',
-    alignItems:    'center',
-    gap:           spacing.xs,
-  },
-  identityIcon: {
-    width:          22,
-    height:         22,
-    borderRadius:   11,
-    alignItems:     'center',
+  settings: {
+    width: 34,
+    height: 34,
+    alignSelf: 'flex-end',
+    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.12)',
   },
+  settingsImage: { width: 27, height: 27 },
+  pressed: { opacity: 0.72 },
+  gameLogo: { alignSelf: 'center' },
+  teamLeagueRow: {
+    height: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  teamMark: { width: 42, height: 35 },
+  leagueMark: { width: 38, height: 35 },
+  teamName: { ...pixelTypography.caption, color: '#B6C7E3', fontSize: 8, maxWidth: '30%' },
+  leagueName: { ...pixelTypography.caption, color: '#B6C7E3', fontSize: 8, maxWidth: '34%' },
+  divider: { width: 2, height: 28, backgroundColor: 'rgba(129, 190, 247, .36)', marginHorizontal: 5 },
+  panelWrap: { alignSelf: 'center' },
+  busWrap: { alignSelf: 'center' },
+  emptyPanel: {
+    minHeight: 112,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#0B1F38',
+    backgroundColor: 'rgba(5, 34, 70, .82)',
+  },
+  loader: { minHeight: 112 },
+  menuGrid: { alignSelf: 'center', gap: 10 },
+  menuRow: { flexDirection: 'row', gap: 12 },
 });

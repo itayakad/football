@@ -54,3 +54,32 @@ export const typography = {
     letterSpacing: -2,
   } as TextStyle,
 };
+
+// Shared game typography. Keep this in the theme so every future pixel screen
+// uses the same bundled font and spacing rules.
+export const pixelTypography = {
+  display: {
+    fontFamily: 'PressStart2P',
+    fontSize: 24,
+    color: '#F5F5F7',
+    letterSpacing: 0,
+  } as TextStyle,
+  heading: {
+    fontFamily: 'PressStart2P',
+    fontSize: 13,
+    color: '#F5F5F7',
+    letterSpacing: 0,
+  } as TextStyle,
+  body: {
+    fontFamily: 'PressStart2P',
+    fontSize: 10,
+    color: '#F5F5F7',
+    letterSpacing: 0,
+  } as TextStyle,
+  caption: {
+    fontFamily: 'PressStart2P',
+    fontSize: 8,
+    color: '#9BA7BC',
+    letterSpacing: 0,
+  } as TextStyle,
+};

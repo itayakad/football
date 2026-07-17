@@ -4,6 +4,10 @@ import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import {
+  PressStart2P_400Regular,
+  useFonts,
+} from '@expo-google-fonts/press-start-2p';
 
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { colors } from './src/theme';
@@ -31,6 +35,12 @@ const navTheme = {
 };
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    PressStart2P: PressStart2P_400Regular,
+  });
+
+  if (!fontsLoaded) return null;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
