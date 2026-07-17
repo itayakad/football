@@ -3,7 +3,7 @@ import {
   LeaguesResponse, LeagueStandingsResponse, RosterResponse, HistoryResponse,
   OffseasonResponse, CoachMarketResponse, PlayerFreeAgentResponse,
   OffensivePhilosophy, PlayTemplate,
-  SchemeUnit, TeamScheme,
+  SchemeUnit, TeamScheme, LiveMatchResponse,
 } from './types';
 
 // For iOS Simulator + web: localhost works.
@@ -46,6 +46,27 @@ export const api = {
     request<SimulateResponse>(`/api/match/${matchId}/simulate`, {
       method: 'POST',
       body: JSON.stringify({ userTeamId, offenseSchemeId, defenseSchemeId }),
+    }),
+
+  liveStart: (matchId: string, userTeamId: string, offenseSchemeId?: string, defenseSchemeId?: string) =>
+    request<LiveMatchResponse>(`/api/match/${matchId}/live/start`, {
+      method: 'POST',
+      body: JSON.stringify({ userTeamId, offenseSchemeId, defenseSchemeId }),
+    }),
+
+  liveMatch: (matchId: string, userTeamId: string) =>
+    request<LiveMatchResponse>(`/api/match/${matchId}/live?userTeamId=${userTeamId}`),
+
+  liveDecision: (matchId: string, userTeamId: string, revision: number, action?: string) =>
+    request<LiveMatchResponse>(`/api/match/${matchId}/live/decision`, {
+      method: 'POST',
+      body: JSON.stringify({ userTeamId, revision, action }),
+    }),
+
+  liveSettings: (matchId: string, userTeamId: string, automate: boolean) =>
+    request<LiveMatchResponse>(`/api/match/${matchId}/live/settings`, {
+      method: 'PATCH',
+      body: JSON.stringify({ userTeamId, automate }),
     }),
 
   leagues: () =>

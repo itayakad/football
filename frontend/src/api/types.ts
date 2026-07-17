@@ -497,3 +497,51 @@ export interface SimulateResponse {
   events:        FeedEvent[];
   seasonAdvance: OffseasonResponse | null;
 }
+
+export type LiveSpecialAction = 'PUNT' | 'FIELD_GOAL' | 'GO_FOR_IT';
+
+export interface LivePlayLog {
+  sequence: number;
+  quarter: number;
+  clock: string;
+  offenseSide: 'home' | 'away';
+  offensePlayId: string;
+  defensePlayId: string;
+  action: string | null;
+  down: number;
+  distance: number;
+  yardLine: number;
+  yards: number;
+  resultLabel: string;
+  scoringEvent?: string | null;
+  homeScore: number;
+  awayScore: number;
+  highlightPlayer?: { name: string; position: string; overall: number } | null;
+}
+
+export interface LiveMatchResponse {
+  matchId: string;
+  status: 'ACTIVE' | 'FINAL';
+  homeTeamName: string;
+  awayTeamName: string;
+  userSide: 'home' | 'away';
+  homeScore: number;
+  awayScore: number;
+  quarterScores: Array<[number, number]>;
+  quarter: number;
+  clock: string;
+  possession: 'home' | 'away';
+  down: number;
+  distance: number;
+  yardLine: number;
+  sequence: number;
+  unit: SchemeUnit;
+  plays: PlayTemplate[];
+  specialActions: LiveSpecialAction[];
+  automate: boolean;
+  deadlineAt: string | null;
+  revision: number;
+  log: LivePlayLog[];
+  lastPlay: LivePlayLog | null;
+  finalResult: SimulateResponse | null;
+}

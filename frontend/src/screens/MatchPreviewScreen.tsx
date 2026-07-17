@@ -10,7 +10,6 @@ import { ScreenHeader } from '../components/ScreenHeader';
 import { Button } from '../components/Button';
 import { api } from '../api/client';
 import { useUserTeamId } from '../state/userTeam';
-import { lastSim } from '../state/lastSim';
 import { colors, radius, spacing, typography } from '../theme';
 import { DefensiveIdentity, MatchPreviewResponse, OffensiveIdentity, SchemeUnit, TeamScheme } from '../api/types';
 import { RootStackParamList } from '../navigation/types';
@@ -41,10 +40,9 @@ export const MatchPreviewScreen: React.FC = () => {
     if (!defenseSchemeId) setDefenseSchemeId(data.schemes.find((scheme) => scheme.unit === 'defense' && scheme.isDefault)?.id ?? data.schemes.find((scheme) => scheme.unit === 'defense')?.id ?? null);
   }, [data, offenseSchemeId, defenseSchemeId]);
 
-  const simulateMutation = useMutation({
-    mutationFn: () => api.simulateWithSchemes(matchId, userTeamId!, offenseSchemeId!, defenseSchemeId!),
-    onSuccess:  (result) => {
-      lastSim.set(result);
+  const liveMutation = useMutation({
+    mutationFn: () => api.liveStart(matchId, userTeamId!, offenseSchemeId!, defenseSchemeId!),
+    onSuccess:  () => {
       navigation.replace('MatchSim', { matchId, userTeamId: userTeamId! });
     },
   });
@@ -153,9 +151,9 @@ export const MatchPreviewScreen: React.FC = () => {
       </View>
 
       <Button
-        label={simulateMutation.isPending ? 'Simulating…' : 'Simulate Game →'}
-        onPress={() => simulateMutation.mutate()}
-        loading={simulateMutation.isPending}
+        label={liveMutation.isPending ? 'Opening Match…' : 'Enter Match →'}
+        onPress={() => liveMutation.mutate()}
+        loading={liveMutation.isPending}
       />
     </ScreenContainer>
   );

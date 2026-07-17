@@ -200,8 +200,8 @@ export function generateMatchFeed(
 }
 
 function clockForPlay(quarter: number, driveIdx: number, down: number): string {
-  const quarterStartDrive = quarter === 1 ? 0 : quarter === 2 ? 5 : quarter === 3 ? 11 : 16;
-  const drivesInQuarter = quarter === 1 ? 5 : quarter === 2 ? 6 : quarter === 3 ? 5 : 6;
+  const quarterStartDrive = quarter === 1 ? 0 : quarter === 2 ? 4 : quarter === 3 ? 8 : 12;
+  const drivesInQuarter = 4;
   const driveOffset = Math.max(0, driveIdx - quarterStartDrive);
   const baseSeconds = Math.max(0, 15 * 60 - Math.floor((driveOffset / drivesInQuarter) * 15 * 60));
   const seconds = Math.max(0, baseSeconds - (down - 1) * 32);

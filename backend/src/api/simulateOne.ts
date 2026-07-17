@@ -41,7 +41,7 @@ function startersByOverall<T extends { id: string; position: string; overall: nu
   });
 }
 
-type TeamWithPersonnel = {
+export type TeamWithPersonnel = {
   id: string;
   name: string;
   offensivePlays: unknown;
@@ -49,7 +49,7 @@ type TeamWithPersonnel = {
   personnel: Array<{ id: string; name: string; position: string; overall: number; stat1: number; stat2: number }>;
 };
 
-function buildMatchProfile(team: TeamWithPersonnel): TeamMatchProfile {
+export function buildMatchProfile(team: TeamWithPersonnel): TeamMatchProfile {
   const coaches = team.personnel.filter((p) => isCoachPosition(p.position));
   const players = team.personnel.filter((p) => !isCoachPosition(p.position));
   return {
@@ -60,6 +60,28 @@ function buildMatchProfile(team: TeamWithPersonnel): TeamMatchProfile {
     offensivePlays: normalizePlayLoadout('offense', team.offensivePlays),
     defensivePlays: normalizePlayLoadout('defense', team.defensivePlays),
   };
+}
+
+export async function loadMatchProfiles(matchId: string) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: {
+      homeTeam: { include: { personnel: true, schemes: true } },
+      awayTeam: { include: { personnel: true, schemes: true } },
+    },
+  });
+  if (!match) throw new Error('Match not found');
+  return {
+    match,
+    home: buildMatchProfile(match.homeTeam),
+    away: buildMatchProfile(match.awayTeam),
+  };
+}
+
+export async function finishInteractiveMatch(week: number, matchId: string): Promise<OffseasonResult | null> {
+  await simulateRestOfWeek(week, matchId);
+  const remaining = await prisma.match.count({ where: { played: false } });
+  return remaining === 0 ? advanceOffseason() : null;
 }
 
 export async function simulateSingleMatch(

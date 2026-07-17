@@ -5,8 +5,17 @@ import { prisma } from '../db';
 import { computeStandings } from '../simulation/standings';
 import { computePositionGroups } from '../simulation/positionGroups';
 import { recommendGameplan } from '../simulation/aiCoach';
-import { TeamMatchProfile } from '../simulation/matchEngine';
-import { simulateSingleMatch } from './simulateOne';
+import {
+  createInteractiveMatchState,
+  InteractiveAction,
+  InteractiveMatchState,
+  interactiveClock,
+  interactiveDecisionUnit,
+  interactiveQuarter,
+  resolveInteractiveSnap,
+  TeamMatchProfile,
+} from '../simulation/matchEngine';
+import { finishInteractiveMatch, loadMatchProfiles, simulateSingleMatch } from './simulateOne';
 import { Gameplan, normalizeGameplan } from '../simulation/gameplan';
 import {
   allPlays,
@@ -1026,6 +1035,301 @@ app.get('/api/match/:matchId/preview', async (req, res, next) => {
       },
     });
   } catch (e) { next(e); }
+});
+
+const LIVE_DECISION_MS = 30_000;
+
+type LiveMatchRow = Omit<Awaited<ReturnType<typeof loadMatchProfiles>>['match'], 'liveState'> & { liveState: unknown };
+
+function readLiveState(value: unknown): InteractiveMatchState | null {
+  if (!value || typeof value !== 'object') return null;
+  const state = value as Partial<InteractiveMatchState>;
+  if (state.version !== 1 || typeof state.sequence !== 'number' || !state.possession) return null;
+  return value as InteractiveMatchState;
+}
+
+function interactiveProfiles(match: LiveMatchRow, home: TeamMatchProfile, away: TeamMatchProfile) {
+  const homeGameplan = match.homeGameplan ? normalizeGameplan(match.homeGameplan) : gameplanFromActiveSchemes(match.homeTeam);
+  const awayGameplan = match.awayGameplan ? normalizeGameplan(match.awayGameplan) : gameplanFromActiveSchemes(match.awayTeam);
+  return {
+    home: { ...home, offensivePlays: homeGameplan.offensivePlays, defensivePlays: homeGameplan.defensivePlays },
+    away: { ...away, offensivePlays: awayGameplan.offensivePlays, defensivePlays: awayGameplan.defensivePlays },
+    homeGameplan,
+    awayGameplan,
+  };
+}
+
+function livePlayChoices(
+  state: InteractiveMatchState,
+  userSide: 'home' | 'away',
+  profile: TeamMatchProfile,
+) {
+  const unit = state.possession === userSide ? 'offense' : 'defense';
+  const ids = unit === 'offense' ? profile.offensivePlays ?? [] : profile.defensivePlays ?? [];
+  return {
+    unit,
+    plays: ids.map((id) => playPayload(playById(id))).filter(Boolean),
+    specialActions: state.down === 4 && state.possession === userSide
+      ? ['PUNT', 'FIELD_GOAL', 'GO_FOR_IT']
+      : [],
+  };
+}
+
+function livePlayPayload(row: any) {
+  return {
+    sequence: row.sequence,
+    quarter: row.quarter,
+    clock: row.clock,
+    offenseSide: row.offenseSide,
+    offensePlayId: row.offensePlayId,
+    defensePlayId: row.defensePlayId,
+    action: row.action,
+    down: row.down,
+    distance: row.distance,
+    yardLine: row.yardLine,
+    yards: row.yards,
+    resultLabel: row.resultLabel,
+    scoringEvent: row.scoringEvent,
+    homeScore: row.homeScore,
+    awayScore: row.awayScore,
+    highlightPlayer: row.highlightPlayer,
+  };
+}
+
+function liveResult(
+  match: LiveMatchRow,
+  state: InteractiveMatchState,
+  homeGameplan: Gameplan,
+  awayGameplan: Gameplan,
+  seasonAdvance: any,
+) {
+  const homeWon = state.homeScore >= state.awayScore;
+  const winner = homeWon ? match.homeTeam.name : match.awayTeam.name;
+  const loser = homeWon ? match.awayTeam.name : match.homeTeam.name;
+  return {
+    matchId: match.id,
+    homeScore: state.homeScore,
+    awayScore: state.awayScore,
+    homeTeamName: match.homeTeam.name,
+    awayTeamName: match.awayTeam.name,
+    homeGameplan,
+    awayGameplan,
+    narrative: `${winner} beat ${loser} ${homeWon ? state.homeScore : state.awayScore}-${homeWon ? state.awayScore : state.homeScore} in a snap-by-snap tactical battle.`,
+    keyMatchup: 'Play calling under pressure',
+    quarterScores: state.quarterScores,
+    events: [],
+    seasonAdvance,
+  };
+}
+
+async function liveResponse(
+  match: LiveMatchRow,
+  state: InteractiveMatchState,
+  userTeamId: string,
+  home: TeamMatchProfile,
+  away: TeamMatchProfile,
+  lastPlay?: any,
+  finalResult?: any,
+) {
+  const userSide = match.homeTeamId === userTeamId ? 'home' : 'away';
+  const profiles = interactiveProfiles(match, home, away);
+  const userProfile = userSide === 'home' ? profiles.home : profiles.away;
+  const choices = livePlayChoices(state, userSide, userProfile);
+  const logs = await prisma.matchPlay.findMany({ where: { matchId: match.id }, orderBy: { sequence: 'asc' } });
+  return {
+    matchId: match.id,
+    status: state.status,
+    homeTeamName: match.homeTeam.name,
+    awayTeamName: match.awayTeam.name,
+    userSide,
+    homeScore: state.homeScore,
+    awayScore: state.awayScore,
+    quarterScores: state.quarterScores,
+    quarter: interactiveQuarter(state),
+    clock: interactiveClock(state),
+    possession: state.possession,
+    down: state.down,
+    distance: state.distance,
+    yardLine: state.yardLine,
+    sequence: state.sequence,
+    unit: choices.unit,
+    plays: choices.plays,
+    specialActions: choices.specialActions,
+    automate: match.liveAutomation,
+    deadlineAt: match.liveDeadlineAt?.toISOString() ?? null,
+    revision: match.liveRevision,
+    log: logs.map(livePlayPayload),
+    lastPlay: lastPlay ? livePlayPayload(lastPlay) : null,
+    finalResult: finalResult ?? null,
+  };
+}
+
+async function getInteractiveMatch(matchId: string) {
+  const loaded = await loadMatchProfiles(matchId);
+  if (loaded.match.played) throw new Error('Match already played');
+  return loaded;
+}
+
+function parseInteractiveAction(body: any): InteractiveAction | undefined {
+  if (!body || body.action == null) return undefined;
+  if (body.action === 'PUNT' || body.action === 'FIELD_GOAL' || body.action === 'GO_FOR_IT') return { type: body.action };
+  if (typeof body.action === 'string') return { type: 'PLAY', playId: body.action };
+  return undefined;
+}
+
+// ─── POST /api/match/:matchId/live/start ──────────────────
+app.post('/api/match/:matchId/live/start', async (req, res, next) => {
+  try {
+    const userTeamId = req.body?.userTeamId as string | undefined;
+    const loaded = await getInteractiveMatch(req.params.matchId);
+    if (!userTeamId || ![loaded.match.homeTeamId, loaded.match.awayTeamId].includes(userTeamId)) {
+      return res.status(403).json({ error: 'User team is not part of this match' });
+    }
+    const existing = readLiveState(loaded.match.liveState);
+    if (existing) return res.json(await liveResponse(loaded.match, existing, userTeamId, loaded.home, loaded.away));
+    const state = createInteractiveMatchState();
+    const deadline = new Date(Date.now() + LIVE_DECISION_MS);
+    const selectedGameplan = await buildSchemeGameplan(userTeamId, req.body?.offenseSchemeId, req.body?.defenseSchemeId);
+    const activeHome = loaded.match.homeTeamId === userTeamId ? selectedGameplan : gameplanFromActiveSchemes(loaded.match.homeTeam);
+    const activeAway = loaded.match.awayTeamId === userTeamId ? selectedGameplan : gameplanFromActiveSchemes(loaded.match.awayTeam);
+    const updated = await prisma.match.update({
+      where: { id: loaded.match.id },
+      data: {
+        liveState: state as any,
+        liveDeadlineAt: deadline,
+        liveRevision: 0,
+        homeGameplan: activeHome as any,
+        awayGameplan: activeAway as any,
+      },
+      include: { homeTeam: { include: { personnel: true, schemes: true } }, awayTeam: { include: { personnel: true, schemes: true } } },
+    });
+    const responseMatch = {
+      ...loaded.match,
+      liveState: state,
+      liveDeadlineAt: deadline,
+      liveRevision: 0,
+      homeGameplan: activeHome as any,
+      awayGameplan: activeAway as any,
+    };
+    return res.json(await liveResponse(responseMatch, state, userTeamId, loaded.home, loaded.away));
+  } catch (e: any) {
+    if (e?.message === 'Match not found') return res.status(404).json({ error: e.message });
+    if (e?.message === 'Match already played') return res.status(409).json({ error: e.message });
+    next(e);
+  }
+});
+
+// ─── GET /api/match/:matchId/live ─────────────────────────
+app.get('/api/match/:matchId/live', async (req, res, next) => {
+  try {
+    const userTeamId = req.query.userTeamId as string | undefined;
+    const loaded = await getInteractiveMatch(req.params.matchId);
+    if (!userTeamId || ![loaded.match.homeTeamId, loaded.match.awayTeamId].includes(userTeamId)) return res.status(403).json({ error: 'User team is not part of this match' });
+    const state = readLiveState(loaded.match.liveState);
+    if (!state) return res.status(404).json({ error: 'Live match has not started' });
+    return res.json(await liveResponse(loaded.match, state, userTeamId, loaded.home, loaded.away));
+  } catch (e: any) {
+    if (e?.message === 'Match not found') return res.status(404).json({ error: e.message });
+    if (e?.message === 'Match already played') return res.status(409).json({ error: e.message });
+    next(e);
+  }
+});
+
+// ─── PATCH /api/match/:matchId/live/settings ──────────────
+app.patch('/api/match/:matchId/live/settings', async (req, res, next) => {
+  try {
+    const userTeamId = req.body?.userTeamId as string | undefined;
+    const automate = req.body?.automate;
+    if (typeof automate !== 'boolean') return res.status(400).json({ error: 'automate must be boolean' });
+    const loaded = await getInteractiveMatch(req.params.matchId);
+    if (!userTeamId || ![loaded.match.homeTeamId, loaded.match.awayTeamId].includes(userTeamId)) return res.status(403).json({ error: 'User team is not part of this match' });
+    const state = readLiveState(loaded.match.liveState);
+    if (!state) return res.status(404).json({ error: 'Live match has not started' });
+    await prisma.match.update({ where: { id: loaded.match.id }, data: { liveAutomation: automate } });
+    const responseMatch = { ...loaded.match, liveAutomation: automate };
+    return res.json(await liveResponse(responseMatch, state, userTeamId, loaded.home, loaded.away));
+  } catch (e) { next(e); }
+});
+
+// ─── POST /api/match/:matchId/live/decision ────────────────
+app.post('/api/match/:matchId/live/decision', async (req, res, next) => {
+  try {
+    const userTeamId = req.body?.userTeamId as string | undefined;
+    const revision = Number(req.body?.revision);
+    const loaded = await getInteractiveMatch(req.params.matchId);
+    if (!userTeamId || ![loaded.match.homeTeamId, loaded.match.awayTeamId].includes(userTeamId)) return res.status(403).json({ error: 'User team is not part of this match' });
+    const state = readLiveState(loaded.match.liveState);
+    if (!state) return res.status(404).json({ error: 'Live match has not started' });
+    const profiles = interactiveProfiles(loaded.match, loaded.home, loaded.away);
+    if (!Number.isInteger(revision) || revision !== loaded.match.liveRevision) return res.status(409).json({ error: 'This decision is stale. Refresh the live match.' });
+    const expired = !loaded.match.liveDeadlineAt || loaded.match.liveDeadlineAt.getTime() <= Date.now();
+    const requested = loaded.match.liveAutomation || expired ? undefined : parseInteractiveAction(req.body);
+    if (!loaded.match.liveAutomation && !expired && !requested) return res.status(400).json({ error: 'A play selection is required' });
+    if (requested?.type === 'PLAY') {
+      const userSide = loaded.match.homeTeamId === userTeamId ? 'home' : 'away';
+      const unit = state.possession === userSide ? 'offense' : 'defense';
+      const profile = userSide === 'home' ? profiles.home : profiles.away;
+      const loadout = unit === 'offense' ? profile.offensivePlays : profile.defensivePlays;
+      if (!loadout?.includes(requested.playId)) return res.status(400).json({ error: 'Selected play is not in the active loadout' });
+      if (unit !== (state.possession === userSide ? 'offense' : 'defense')) return res.status(400).json({ error: 'Selected play is not valid for this situation' });
+    }
+    if (requested && requested.type !== 'PLAY' && (state.down !== 4 || state.possession !== (loaded.match.homeTeamId === userTeamId ? 'home' : 'away'))) {
+      return res.status(400).json({ error: 'Special actions are only available to the offense on fourth down' });
+    }
+
+    const userSide = loaded.match.homeTeamId === userTeamId ? 'home' : 'away';
+    const result = resolveInteractiveSnap(state, profiles.home, profiles.away, userSide, requested);
+    const nextDeadline = result.final ? null : new Date(Date.now() + LIVE_DECISION_MS);
+    const nextRevision = loaded.match.liveRevision + 1;
+    const updated = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.match.updateMany({
+        where: { id: loaded.match.id, liveRevision: loaded.match.liveRevision, played: false },
+        data: {
+          liveState: result.state as any,
+          liveRevision: nextRevision,
+          liveDeadlineAt: nextDeadline,
+          homeScore: result.state.homeScore,
+          awayScore: result.state.awayScore,
+          ...(result.final ? { played: true, homeGameplan: profiles.homeGameplan as any, awayGameplan: profiles.awayGameplan as any } : {}),
+        },
+      });
+      if (claimed.count !== 1) throw new Error('STALE_LIVE_DECISION');
+      await tx.matchPlay.create({
+        data: {
+          matchId: loaded.match.id,
+          sequence: result.state.sequence,
+          quarter: interactiveQuarter(state),
+          clock: interactiveClock(state),
+          offenseSide: result.play.offenseSide,
+          offensePlayId: result.play.offensePlayId,
+          defensePlayId: result.play.defensePlayId,
+          action: result.action.type,
+          down: result.play.down,
+          distance: result.play.distance,
+          yardLine: result.play.yardLine,
+          yards: result.play.yards,
+          resultLabel: result.play.resultLabel,
+          scoringEvent: result.play.scoringEvent,
+          homeScore: result.state.homeScore,
+          awayScore: result.state.awayScore,
+          highlightPlayer: result.play.highlightPlayer as any,
+        },
+      });
+      return tx.match.findUnique({ where: { id: loaded.match.id }, include: { homeTeam: { include: { personnel: true, schemes: true } }, awayTeam: { include: { personnel: true, schemes: true } } } });
+    });
+
+    if (!updated) throw new Error('Match not found');
+    const seasonAdvance = result.final ? await finishInteractiveMatch(loaded.match.week, loaded.match.id) : null;
+    const finalResult = result.final
+      ? liveResult(loaded.match, result.state, profiles.homeGameplan, profiles.awayGameplan, seasonAdvance)
+      : null;
+    return res.json(await liveResponse(updated, result.state, userTeamId, loaded.home, loaded.away, result.play, finalResult));
+  } catch (e: any) {
+    if (e?.message === 'STALE_LIVE_DECISION') return res.status(409).json({ error: 'This decision was already resolved. Refresh the live match.' });
+    if (e?.message === 'Match not found') return res.status(404).json({ error: e.message });
+    if (e?.message === 'Match already played') return res.status(409).json({ error: e.message });
+    next(e);
+  }
 });
 
 // ─── POST /api/match/:matchId/simulate ────────────────────

@@ -118,8 +118,8 @@ export interface MatchSimResult {
 // ── Configuration ─────────────────────────────────────────
 
 const HOME_FIELD_PLAY_BONUS = 1.5; // small additive shove to home offense play strengths
-const TOTAL_DRIVES = 22;           // ~11 per team
-const QUARTER_BREAKPOINTS = [5, 11, 16, 22]; // drive index < this => quarter
+const TOTAL_DRIVES = 16;           // 2 drives per team per quarter
+const QUARTER_BREAKPOINTS = [4, 8, 12, 16]; // drive index < this => quarter
 
 // HC RNG distribution lookup (offensive OVR -> {optimal, neutral, poor} weights).
 // 50 OVR ≈ 20/50/30, 100 OVR ≈ 80/15/5. Linear with clamps in between.
@@ -587,6 +587,305 @@ function blankPlayEvent(partial: Partial<PlayEvent>): PlayEvent {
     yards: 0,
     ...partial,
   };
+}
+
+// ── Interactive match state ───────────────────────────────
+
+export type InteractiveAction =
+  | { type: 'PLAY'; playId: string }
+  | { type: 'PUNT' }
+  | { type: 'FIELD_GOAL' }
+  | { type: 'GO_FOR_IT' };
+
+export interface InteractiveMatchState {
+  version: 1;
+  status: 'ACTIVE' | 'FINAL';
+  homeScore: number;
+  awayScore: number;
+  quarterScores: Array<[number, number]>;
+  possession: 'home' | 'away';
+  drive: number;
+  down: number;
+  distance: number;
+  yardLine: number;
+  overtime: boolean;
+  overtimePossessions: number;
+  sequence: number;
+}
+
+export interface InteractiveSnapResult {
+  state: InteractiveMatchState;
+  play: PlayEvent;
+  action: InteractiveAction;
+  final: boolean;
+}
+
+export function createInteractiveMatchState(): InteractiveMatchState {
+  return {
+    version: 1,
+    status: 'ACTIVE',
+    homeScore: 0,
+    awayScore: 0,
+    quarterScores: [[0, 0], [0, 0], [0, 0], [0, 0]],
+    possession: Math.random() < 0.5 ? 'home' : 'away',
+    drive: 0,
+    down: 1,
+    distance: 10,
+    yardLine: 25,
+    overtime: false,
+    overtimePossessions: 0,
+    sequence: 0,
+  };
+}
+
+export function interactiveQuarter(state: InteractiveMatchState): number {
+  return state.overtime ? 4 : quarterFromDrive(state.drive);
+}
+
+export function interactiveClock(state: InteractiveMatchState): string {
+  if (state.status === 'FINAL') return '00:00';
+  const quarter = interactiveQuarter(state);
+  const quarterStartDrive = quarter === 1 ? 0 : quarter === 2 ? 4 : quarter === 3 ? 8 : 12;
+  const drivesInQuarter = 4;
+  const driveOffset = Math.max(0, state.drive - quarterStartDrive);
+  const baseSeconds = Math.max(0, 15 * 60 - Math.floor((driveOffset / drivesInQuarter) * 15 * 60));
+  const seconds = Math.max(0, baseSeconds - (state.down - 1) * 32);
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+export function interactiveDecisionUnit(state: InteractiveMatchState): 'offense' | 'defense' {
+  return state.possession === 'home' ? 'offense' : 'defense';
+}
+
+export function resolveInteractiveSnap(
+  state: InteractiveMatchState,
+  home: TeamMatchProfile,
+  away: TeamMatchProfile,
+  userSide: 'home' | 'away',
+  requestedAction?: InteractiveAction,
+): InteractiveSnapResult {
+  if (state.status === 'FINAL') throw new Error('Match already finished');
+
+  const homeCtx = buildContext(home, normalizeGameplan({
+    offensivePlays: home.offensivePlays,
+    defensivePlays: home.defensivePlays,
+  }), 'home');
+  const awayCtx = buildContext(away, normalizeGameplan({
+    offensivePlays: away.offensivePlays,
+    defensivePlays: away.defensivePlays,
+  }), 'away');
+  const off = state.possession === 'home' ? homeCtx : awayCtx;
+  const def = state.possession === 'home' ? awayCtx : homeCtx;
+  const userHasPossession = state.possession === userSide;
+  const action = requestedAction ?? hcActionForSituation(state, off, def, userSide);
+
+  if (state.down === 4 && action.type !== 'PLAY' && action.type !== 'GO_FOR_IT') {
+    const play = action.type === 'FIELD_GOAL'
+      ? resolveFieldGoal(state, off)
+      : resolvePunt(state, off);
+    return finishInteractiveSnap(state, play, action);
+  }
+
+  const selectedOffensePlay = userHasPossession && action.type === 'PLAY' && userSide === state.possession
+    ? offensivePlayById(action.playId)
+    : pickOffensivePlay(off, def);
+  const selectedDefensePlay = !userHasPossession && action.type === 'PLAY'
+    ? defensivePlayById(action.playId)
+    : pickDefensivePlay(off, def);
+
+  if (!selectedOffensePlay) throw new Error('Invalid offensive play');
+  if (!selectedDefensePlay) throw new Error('Invalid defensive play');
+
+  const resolution = resolvePlay(selectedOffensePlay, selectedDefensePlay, off, def);
+  let appliedYards = resolution.yards;
+  if (state.yardLine + appliedYards > 100) appliedYards = 100 - state.yardLine;
+
+  const play = blankPlayEvent({
+    drive: state.drive,
+    quarter: interactiveQuarter(state),
+    offenseSide: state.possession,
+    offensePlayId: selectedOffensePlay.id,
+    defensePlayId: selectedDefensePlay.id,
+    offenseCategory: selectedOffensePlay.category,
+    defenseCategory: selectedDefensePlay.category,
+    down: state.down,
+    distance: state.distance,
+    yardLine: state.yardLine,
+    offWinProb: resolution.offWinProb,
+    offenseWon: resolution.offenseWon,
+    resultLabel: resolution.resultLabel,
+    yards: appliedYards,
+    calculation: resolution.calculation,
+    highlightPlayer: highlightForPlay(
+      resolution.offenseWon ? selectedOffensePlay : selectedDefensePlay,
+      resolution.offenseWon ? off.slots : def.slots,
+    ),
+    scoringEvent: resolution.scoringEvent,
+  });
+
+  if (play.scoringEvent === 'DEFENSIVE_TD' || play.scoringEvent === 'INT' || play.scoringEvent === 'FUMBLE') {
+    return finishInteractiveSnap(state, play, action);
+  }
+
+  const nextYardLine = state.yardLine + appliedYards;
+  if (nextYardLine < 0) {
+    play.scoringEvent = 'SAFETY';
+    return finishInteractiveSnap(state, play, action);
+  }
+  if (nextYardLine >= 100) {
+    play.scoringEvent = 'TD';
+    return finishInteractiveSnap(state, play, action);
+  }
+
+  const nextDistance = state.distance - appliedYards;
+  if (nextDistance <= 0) {
+    return finishInteractiveSnap(state, play, action, {
+      possession: state.possession,
+      down: 1,
+      distance: 10,
+      yardLine: nextYardLine,
+    });
+  }
+
+  if (state.down === 4) {
+    play.scoringEvent = 'TURNOVER_ON_DOWNS';
+    return finishInteractiveSnap(state, play, action);
+  }
+
+  return finishInteractiveSnap(state, play, action, {
+    possession: state.possession,
+    down: state.down + 1,
+    distance: Math.max(1, nextDistance),
+    yardLine: nextYardLine,
+  });
+}
+
+function hcActionForSituation(state: InteractiveMatchState, off: TeamCtx, def: TeamCtx, userSide: 'home' | 'away'): InteractiveAction {
+  if (state.down === 4) {
+    const yardsToGoal = 100 - state.yardLine;
+    const kickDistance = yardsToGoal + 17;
+    if (kickDistance <= 60) return { type: 'FIELD_GOAL' };
+    if (yardsToGoal > 50 || state.distance > 5) return { type: 'PUNT' };
+  }
+  return userSide === state.possession
+    ? { type: 'PLAY', playId: pickOffensivePlay(off, def).id }
+    : { type: 'PLAY', playId: pickDefensivePlay(off, def).id };
+}
+
+function resolveFieldGoal(state: InteractiveMatchState, off: TeamCtx): PlayEvent {
+  const kickDistance = 100 - state.yardLine + 17;
+  const good = rollFGSuccess(kickDistance);
+  return blankPlayEvent({
+    drive: state.drive,
+    quarter: interactiveQuarter(state),
+    offenseSide: off.side,
+    offensePlayId: '__fg__',
+    defensePlayId: '__fg_block__',
+    offenseCategory: 'RUNNING',
+    defenseCategory: 'ZONE',
+    down: state.down,
+    distance: state.distance,
+    yardLine: state.yardLine,
+    offWinProb: 0.5,
+    offenseWon: good,
+    resultLabel: good ? 'OFFENSIVE_GAIN' : 'DEFENSIVE_STOP',
+    yards: 0,
+    scoringEvent: good ? 'FG_GOOD' : 'FG_MISS',
+  });
+}
+
+function resolvePunt(state: InteractiveMatchState, off: TeamCtx): PlayEvent {
+  return blankPlayEvent({
+    drive: state.drive,
+    quarter: interactiveQuarter(state),
+    offenseSide: off.side,
+    offensePlayId: '__punt__',
+    defensePlayId: '__punt_return__',
+    offenseCategory: 'RUNNING',
+    defenseCategory: 'ZONE',
+    down: state.down,
+    distance: state.distance,
+    yardLine: state.yardLine,
+    offWinProb: 0.5,
+    offenseWon: true,
+    resultLabel: 'NEUTRAL',
+    yards: 0,
+    scoringEvent: 'PUNT',
+  });
+}
+
+function finishInteractiveSnap(
+  state: InteractiveMatchState,
+  play: PlayEvent,
+  action: InteractiveAction,
+  continuation: Partial<InteractiveMatchState> = {},
+): InteractiveSnapResult {
+  const next: InteractiveMatchState = {
+    ...state,
+    ...continuation,
+    sequence: state.sequence + 1,
+    quarterScores: state.quarterScores.map((score) => [...score] as [number, number]),
+  };
+
+  if (play.scoringEvent === 'TD' || play.scoringEvent === 'FG_GOOD' || play.scoringEvent === 'DEFENSIVE_TD' || play.scoringEvent === 'SAFETY') {
+    const points = play.scoringEvent === 'SAFETY' ? 2 : play.scoringEvent === 'FG_GOOD' ? 3 : 7;
+    const scoringSide = play.scoringEvent === 'DEFENSIVE_TD' || play.scoringEvent === 'SAFETY'
+      ? otherSide(play.offenseSide)
+      : play.offenseSide;
+    if (scoringSide === 'home') next.homeScore += points;
+    else next.awayScore += points;
+    next.quarterScores[interactiveQuarter(state) - 1][scoringSide === 'home' ? 0 : 1] += points;
+    return endDrive(next, play, action, play.scoringEvent === 'SAFETY' ? 40 : 25);
+  }
+
+  if (play.scoringEvent === 'PUNT' || play.scoringEvent === 'FG_MISS' || play.scoringEvent === 'INT' || play.scoringEvent === 'FUMBLE' || play.scoringEvent === 'TURNOVER_ON_DOWNS') {
+    const nextStart = play.scoringEvent === 'PUNT'
+      ? clamp(100 - state.yardLine - 30 - Math.floor(Math.random() * 12), 5, 80)
+      : play.scoringEvent === 'FG_MISS'
+        ? Math.max(20, 100 - state.yardLine)
+        : clamp(100 - state.yardLine, 5, 95);
+    return endDrive(next, play, action, nextStart);
+  }
+
+  return { state: next, play, action, final: false };
+}
+
+function endDrive(
+  state: InteractiveMatchState,
+  play: PlayEvent,
+  action: InteractiveAction,
+  nextStart: number,
+): InteractiveSnapResult {
+  const completedDrives = state.drive + 1;
+  const next = { ...state, drive: completedDrives, possession: otherSide(state.possession), down: 1, distance: 10, yardLine: nextStart };
+
+  if (state.overtime) {
+    next.overtimePossessions = state.overtimePossessions + 1;
+    if (play.scoringEvent && ['TD', 'FG_GOOD', 'DEFENSIVE_TD', 'SAFETY'].includes(play.scoringEvent)) {
+      next.status = 'FINAL';
+    } else if (next.overtimePossessions >= 2) {
+      if (next.homeScore === next.awayScore) {
+        if (Math.random() < 0.55) next.homeScore += 3;
+        else next.awayScore += 3;
+      }
+      next.status = 'FINAL';
+    }
+    return { state: next, play, action, final: next.status === 'FINAL' };
+  }
+
+  if (completedDrives >= TOTAL_DRIVES) {
+    if (next.homeScore === next.awayScore) {
+      next.overtime = true;
+      next.overtimePossessions = 0;
+      next.drive = TOTAL_DRIVES;
+      next.possession = Math.random() < 0.5 ? 'home' : 'away';
+      next.yardLine = 25;
+    } else {
+      next.status = 'FINAL';
+    }
+  }
+
+  return { state: next, play, action, final: next.status === 'FINAL' };
 }
 
 // ── Match simulation ──────────────────────────────────────

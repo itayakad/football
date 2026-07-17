@@ -195,4 +195,35 @@ model Match {
   // overridable by user for their team. Shape: { offensivePlays, defensivePlays }.
   homeGameplan Json?
   awayGameplan Json?
+  liveState    Json?
+  liveAutomation Boolean @default(false)
+  liveDeadlineAt DateTime?
+  liveRevision Int @default(0)
+  livePlays    MatchPlay[]
+}
+
+model MatchPlay {
+  id             String   @id @default(cuid())
+  matchId        String
+  match          Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  sequence       Int
+  quarter        Int
+  clock          String
+  offenseSide    String
+  offensePlayId  String
+  defensePlayId  String
+  action         String?
+  down           Int
+  distance       Int
+  yardLine       Int
+  yards          Int
+  resultLabel    String
+  scoringEvent   String?
+  homeScore      Int
+  awayScore      Int
+  highlightPlayer Json?
+  createdAt      DateTime @default(now())
+
+  @@unique([matchId, sequence])
+  @@index([matchId, createdAt])
 }

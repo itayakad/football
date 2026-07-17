@@ -41,7 +41,7 @@ fi
 kill_port "$BACKEND_PORT"
 kill_port "$FRONTEND_PORT"
 
-BACKEND_COMMAND=$(printf 'cd %q && npm run build && npm run seed && printf %q && npm run api:dev' \
+BACKEND_COMMAND=$(printf 'cd %q && npm run db:deploy && npm run build && npm run seed && printf %q && npm run api:dev' \
   "$ROOT_DIR/backend" \
   'Seed complete. Starting backend API...\n')
 FRONTEND_COMMAND=$(printf 'cd %q && npm start' "$ROOT_DIR/frontend")
